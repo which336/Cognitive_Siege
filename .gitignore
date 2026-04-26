@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.gh-pages-out/
+*.log
+.DS_Store
+.vite/
+.idea/
+.vscode/
