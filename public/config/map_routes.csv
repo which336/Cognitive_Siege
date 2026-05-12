@@ -1,0 +1,32 @@
+route,seq,col,row,note
+short,1,1,5,spawn
+short,2,4,5,fork
+short,3,4,3,upper turn
+short,4,9,3,upper lane
+short,5,9,5,drop
+short,6,13,5,mid lane
+short,7,13,7,merge approach
+short,8,19,7,shared merge
+short,9,22,7,final bend
+short,10,22,8,self core
+long,1,1,5,spawn
+long,2,4,5,fork
+long,3,4,8,lower entry
+long,4,7,8,lower lane
+long,5,7,10,long bottom
+long,6,14,10,long bottom
+long,7,14,8,rise
+long,8,18,8,merge approach
+long,9,18,7,merge approach
+long,10,19,7,shared merge
+long,11,22,7,final bend
+long,12,22,8,self core
+edge,1,1,5,spawn
+edge,2,4,5,fork
+edge,3,4,2,top edge
+edge,4,16,2,top run
+edge,5,16,4,drop
+edge,6,19,4,side breach
+edge,7,19,7,shared merge
+edge,8,22,7,final bend
+edge,9,22,8,self core

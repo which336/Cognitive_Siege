@@ -1,0 +1,16 @@
+enemy,priority,route,note
+anxiety,1,short,fast pressure prefers shortest route
+anxiety,2,edge,secondary side pressure
+anxiety,3,long,last fallback
+depression,1,long,slow tank prefers longer route
+depression,2,short,secondary direct pressure
+depression,3,edge,last fallback
+obsession,1,edge,loop unit pressures side route
+obsession,2,short,secondary direct pressure
+obsession,3,long,last fallback
+guilt,1,long,cloaked unit uses long infiltration
+guilt,2,edge,secondary side infiltration
+guilt,3,short,last fallback
+ptsd,1,edge,flicker unit pressures side route
+ptsd,2,long,secondary long route
+ptsd,3,short,last fallback

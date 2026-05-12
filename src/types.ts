@@ -1,9 +1,10 @@
 // ================== Cognitive Siege - Shared Types ==================
 
 export type EnemyKind = 'anxiety' | 'depression' | 'obsession' | 'guilt' | 'ptsd';
-export type TowerKind = 'memory' | 'belief' | 'resonance' | 'acceptance';
+export type TowerKind = 'memory' | 'belief' | 'resonance' | 'acceptance' | 'insight' | 'boundary';
 
 export type PathBias = 'short' | 'long' | 'edge' | 'center' | 'random';
+export type RouteVariant = 'short' | 'long' | 'edge';
 export type Formation = 'scattered' | 'clustered' | 'wedge' | 'rear_first';
 export type SkillFlag = 'stealth' | 'swarm' | 'rush' | 'split' | 'taunt' | 'shield';
 
@@ -17,6 +18,35 @@ export interface GridPos {
 export interface PixelPos {
   x: number;
   y: number;
+}
+
+export interface MapProjectionSummary {
+  activeRoute: RouteVariant;
+  activeRouteLabel: string;
+  activeRoutes: RouteVariant[];
+  inactiveRoutes: RouteVariant[];
+  buildCellCount: number;
+  blockedCellCount: number;
+  corruptionLevel: number;
+  towerPocketCount: number;
+  attackIntent: string;
+}
+
+export interface MapProjection {
+  activeRoute: RouteVariant;
+  activeRoutes: RouteVariant[];
+  inactiveRoutes: RouteVariant[];
+  pathCells: GridPos[];
+  inactivePathCells: GridPos[];
+  buildCells: GridPos[];
+  blockedCells: GridPos[];
+  corruptionLevel: number;
+  summary: MapProjectionSummary;
+}
+
+export interface AgentProofMapChange {
+  before: MapProjectionSummary;
+  after: MapProjectionSummary;
 }
 
 export interface EnemySpawnSpec {
@@ -82,6 +112,51 @@ export interface ReviewResult {
   next_strategy: NextStrategy;
   /** True if produced by LLM; false if from fallback library */
   fromLLM: boolean;
+}
+
+export interface AgentProofBattleSummary {
+  wave: number;
+  outcome: BattleSummary['outcome'];
+  sanityAfter: number;
+  sanityDelta: number;
+  mindAfter: number;
+  enemiesKilled: number;
+  enemiesLeaked: number;
+  deathsByTower: Partial<Record<TowerKind | 'reached_core' | 'unknown', number>>;
+  perKind: Partial<Record<EnemyKind, {
+    spawned: number;
+    killed: number;
+    leaked: number;
+    avgProgress: number;
+  }>>;
+  towerLayout: Partial<Record<TowerKind, number>>;
+}
+
+export interface AgentProofWaveSummary {
+  wave: number;
+  isBoss: boolean;
+  formation: Formation;
+  mindGift: number;
+  spawnCount: number;
+  firstSpawnMs: number;
+  lastSpawnMs: number;
+  pathBiases: PathBias[];
+  kinds: Partial<Record<EnemyKind, number>>;
+  skills: Partial<Record<SkillFlag, number>>;
+  hpMulRange: [number, number];
+  speedMulRange: [number, number];
+}
+
+export interface AgentProofSnapshot {
+  summary: AgentProofBattleSummary;
+  source: 'llm' | 'fallback';
+  mode: 'demo' | 'online';
+  status: 'llm_parsed' | 'demo_fallback' | 'online_fallback';
+  strategy: NextStrategy;
+  changes: string[];
+  nextWaveBefore: AgentProofWaveSummary | null;
+  nextWaveAfter: AgentProofWaveSummary | null;
+  mapChange?: AgentProofMapChange;
 }
 
 export interface BossPersona {

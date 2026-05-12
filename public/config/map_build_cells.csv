@@ -1,0 +1,65 @@
+route,col,row,note
+short,2,3,opening pocket
+short,3,3,opening pocket
+short,2,4,opening pocket
+short,3,4,opening pocket
+short,5,4,mid pocket
+short,6,4,mid pocket
+short,5,5,mid pocket
+short,6,5,mid pocket
+short,8,2,upper pocket
+short,9,2,upper pocket
+short,12,4,center pocket
+short,13,4,center pocket
+short,14,4,center pocket
+short,12,5,center pocket
+short,13,5,center pocket
+short,14,5,center pocket
+short,17,6,late pocket
+short,18,6,late pocket
+short,19,6,late pocket
+short,19,7,late pocket
+short,19,8,late pocket
+short,20,10,core pocket
+short,21,10,core pocket
+long,3,3,opening pocket
+long,4,3,opening pocket
+long,3,4,opening pocket
+long,4,4,opening pocket
+long,5,5,fork pocket
+long,5,6,fork pocket
+long,7,8,lower pocket
+long,8,8,lower pocket
+long,9,8,lower pocket
+long,10,9,bottom pocket
+long,11,9,bottom pocket
+long,12,9,bottom pocket
+long,14,8,turn pocket
+long,15,8,turn pocket
+long,16,8,turn pocket
+long,17,6,merge pocket
+long,18,6,merge pocket
+long,19,7,merge pocket
+long,20,7,merge pocket
+long,20,10,core pocket
+long,21,10,core pocket
+edge,4,1,top pocket
+edge,5,1,top pocket
+edge,6,1,top pocket
+edge,3,3,fork pocket
+edge,4,3,fork pocket
+edge,7,3,top lane pocket
+edge,8,3,top lane pocket
+edge,9,3,top lane pocket
+edge,12,3,top lane pocket
+edge,13,3,top lane pocket
+edge,14,3,top lane pocket
+edge,16,4,side pocket
+edge,18,4,side pocket
+edge,19,4,side pocket
+edge,18,6,merge pocket
+edge,19,6,merge pocket
+edge,19,7,merge pocket
+edge,19,8,merge pocket
+edge,20,10,core pocket
+edge,21,10,core pocket

@@ -7,8 +7,8 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
   const cur = loadSettings();
   const panel = el('div', { cls: 'cs-panel' });
 
-  panel.appendChild(el('div', { cls: 'cs-panel-title', text: '设置 / SETTINGS' }));
-  panel.appendChild(el('div', { cls: 'cs-panel-sub', text: 'AI · DIFFICULTY · DEMO MODE' }));
+  panel.appendChild(el('div', { cls: 'cs-panel-title', text: '设置' }));
+  panel.appendChild(el('div', { cls: 'cs-panel-sub', text: '智能体 · 难度 · 演示模式' }));
 
   // Demo mode
   const demoCheck = el('input', { attrs: { type: 'checkbox' } }) as HTMLInputElement;
@@ -37,7 +37,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
   }) as HTMLInputElement;
   apiBaseInput.value = cur.apiBase;
   panel.appendChild(el('div', { cls: 'cs-section' }, [
-    el('div', { cls: 'cs-section-label', text: 'API Base URL（OpenAI 兼容）' }),
+    el('div', { cls: 'cs-section-label', text: '接口地址（兼容 OpenAI 格式）' }),
     apiBaseInput,
   ]));
 
@@ -76,8 +76,8 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
   ]));
 
   panel.appendChild(el('div', { cls: 'cs-disclaimer', text:
-    '提示：API Key 仅保存在你本地浏览器，绝不会发送到任何第三方服务器。游戏会以 OpenAI Chat Completions 协议直接请求你填的 API Base。' +
-    '若你只是想体验，请保留"演示模式"勾选——所有 LLM 输出会改为来自本地预生成"心声库"。',
+    '提示：密钥仅保存在你本地浏览器，绝不会发送到任何第三方服务器。游戏会按兼容格式直接请求你填写的接口地址。' +
+    '若你只是想体验，请保留"演示模式"勾选——所有大模型输出会改为来自本地预生成"心声库"。',
   }));
 
   panel.appendChild(el('div', { cls: 'cs-actions' }, [

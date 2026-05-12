@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { EnemySpawnSpec, GridPos, PixelPos } from '../../types';
+import { EnemySpawnSpec, GridPos, PixelPos, RouteVariant } from '../../types';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { Grid } from '../systems/Grid';
 import { DemonPersona, pickPersona } from '../data/personas';
@@ -7,6 +7,7 @@ import { DemonPersona, pickPersona } from '../data/personas';
 export interface EnemyOpts {
   spec: EnemySpawnSpec;
   path: GridPos[];
+  routeVariant?: RouteVariant;
   grid: Grid;
   isBoss?: boolean;
   bossDamageMul?: number;
@@ -21,7 +22,7 @@ export interface EnemyOpts {
   waveBountyMul?: number;
 }
 
-export type DeathCause = 'memory' | 'belief' | 'resonance' | 'acceptance' | 'reached_core' | 'unknown';
+export type DeathCause = 'memory' | 'belief' | 'resonance' | 'acceptance' | 'insight' | 'boundary' | 'reached_core' | 'unknown';
 
 const SCALE_BOSS = 2.6;
 
@@ -38,6 +39,8 @@ export class Enemy {
   spec: EnemySpawnSpec;
   persona: DemonPersona;
   isBoss: boolean;
+  routeVariant: RouteVariant;
+  pathCells: GridPos[];
 
   // Pixel polyline + cumulative distances
   pathPx: PixelPos[];
@@ -53,6 +56,10 @@ export class Enemy {
   damage: number;
   bounty: number;
   pathProgress = 0;
+  bossAuraSpeedMul = 1;
+  bossAuraDamageMul = 1;
+  bossAuraDamageTakenMul = 1;
+  bossHpShieldApplied = false;
 
   // Behavior state
   cloaked = false;
@@ -64,6 +71,8 @@ export class Enemy {
   // path starts a loop-back. Multiplied into final speed alongside slowFactor.
   tempSpeedMul = 1;
   tempSpeedEndAt = 0;  // gameTime ms
+  rootedUntil = 0;      // gameTime ms
+  rootHintNextAt = 0;   // gameTime ms
 
   // Obsession loop
   loopNextAt = 2500;   // first attempt 2.5s in
@@ -80,9 +89,11 @@ export class Enemy {
   body: Phaser.GameObjects.Container;
   disc: Phaser.GameObjects.Arc;
   glyph: Phaser.GameObjects.Text;
+  artSprite: Phaser.GameObjects.Image | null = null;
   hpBarBg: Phaser.GameObjects.Rectangle;
   hpBarFill: Phaser.GameObjects.Rectangle;
   nameLabel: Phaser.GameObjects.Text | null = null;
+  tauntBadge: Phaser.GameObjects.Container | null = null;
   cloakAlphaTween: Phaser.Tweens.Tween | null = null;
 
   constructor(scene: Phaser.Scene, opts: EnemyOpts) {
@@ -90,7 +101,9 @@ export class Enemy {
     this.def = ENEMY_DEFS[opts.spec.kind];
     this.spec = opts.spec;
     this.isBoss = !!opts.isBoss;
+    this.routeVariant = opts.routeVariant ?? 'short';
     this.persona = pickPersona(opts.spec.kind, opts.spec.personaIdx);
+    this.pathCells = opts.path.map(cell => ({ col: cell.col, row: cell.row }));
 
     // Build pixel polyline + cumulative distances
     this.pathPx = opts.path.map(g => opts.grid.cellCenter(g.col, g.row));
@@ -139,18 +152,29 @@ export class Enemy {
     const start = this.pathPx[0];
     this.body = scene.add.container(start.x, start.y);
     const r = this.def.radius * (this.isBoss ? SCALE_BOSS : 1);
-    this.disc = scene.add.circle(0, 0, r, this.def.color, 0.85);
-    this.disc.setStrokeStyle(2, 0xffffff, 0.35);
+    this.disc = scene.add.circle(0, 0, r, this.def.color, 0.96);
+    this.disc.setStrokeStyle(2, 0xffffff, 0.55);
+    const artKey = `enemy-${this.def.kind}`;
+    if (scene.textures.exists(artKey)) {
+      this.disc.setAlpha(0);
+      this.artSprite = scene.add.image(0, 0, artKey)
+        .setOrigin(0.5)
+        .setDisplaySize(this.isBoss ? 92 : 40, this.isBoss ? 92 : 40)
+        .setAlpha(1);
+    }
     this.glyph = scene.add.text(0, 0, this.def.emoji, {
       fontSize: this.isBoss ? '32px' : '16px',
       color: '#fff',
-    }).setOrigin(0.5, 0.55);
+    }).setOrigin(0.5, 0.55).setAlpha(this.artSprite ? 0 : 1);
 
     const hpW = this.isBoss ? 56 : 26;
     this.hpBarBg = scene.add.rectangle(0, -r - 6, hpW, 4, 0x000000, 0.6).setOrigin(0.5, 1);
     this.hpBarFill = scene.add.rectangle(-hpW / 2, -r - 6, hpW, 4, 0x67e8f9, 1).setOrigin(0, 1);
 
-    this.body.add([this.disc, this.glyph, this.hpBarBg, this.hpBarFill]);
+    this.body.add([this.disc]);
+    if (this.artSprite) this.body.add(this.artSprite);
+    this.body.add([this.glyph, this.hpBarBg, this.hpBarFill]);
+    if (this.spec.skills.includes('taunt')) this.addTauntBadge(r);
 
     if (this.isBoss) {
       this.nameLabel = scene.add.text(0, r + 6, this.persona.name, {
@@ -162,6 +186,29 @@ export class Enemy {
     if (this.cloaked) this.applyCloakVisual();
     this.body.setDepth(20);
     this.emitChatter('spawn');
+  }
+
+  private addTauntBadge(radius: number): void {
+    const y = -radius - 15;
+    const badge = this.scene.add.container(0, y);
+    const bg = this.scene.add.circle(0, 0, this.isBoss ? 8 : 6, 0xfde68a, 0.96)
+      .setStrokeStyle(1.5, 0x7c2d12, 0.95);
+    const mark = this.scene.add.text(0, -1, '!', {
+      fontSize: this.isBoss ? '13px' : '10px',
+      color: '#7c2d12',
+      fontStyle: 'bold',
+    }).setOrigin(0.5);
+    badge.add([bg, mark]);
+    this.body.add(badge);
+    this.tauntBadge = badge;
+    this.scene.tweens.add({
+      targets: badge,
+      y: y - 3,
+      duration: 520,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
   }
 
   applySlow(factor: number, durationMs: number, gameTimeNow: number): void {
@@ -186,6 +233,15 @@ export class Enemy {
     this.flashSpeedBuffHint();
   }
 
+  applyRoot(durationMs: number, gameTimeNow: number): void {
+    const scaled = this.isBoss ? Math.round(durationMs * 0.45) : durationMs;
+    this.rootedUntil = Math.max(this.rootedUntil, gameTimeNow + scaled);
+    if (gameTimeNow >= this.rootHintNextAt) {
+      this.rootHintNextAt = gameTimeNow + 900;
+      this.flashRootHint();
+    }
+  }
+
   private flashSpeedBuffHint(): void {
     const t = this.scene.add.text(this.body.x, this.body.y - 22, '↑↑', {
       fontSize: '13px', color: '#fbbf24', fontFamily: 'inherit',
@@ -203,16 +259,30 @@ export class Enemy {
     if (this.cloaked && !this.revealed) {
       this.revealed = true;
       this.cloakAlphaTween?.stop();
-      this.disc.setAlpha(0.85);
-      this.glyph.setAlpha(1);
+      this.disc.setAlpha(this.artSprite ? 0 : 0.96);
+      this.artSprite?.setAlpha(1);
+      this.glyph.setAlpha(this.artSprite ? 0 : 1);
     }
+  }
+
+  applyBossHpShield(ratio: number): void {
+    if (this.bossHpShieldApplied || ratio <= 0) return;
+    this.bossHpShieldApplied = true;
+    const added = Math.max(1, Math.round(this.hpMax * ratio));
+    this.hpMax += added;
+    this.hp += added;
+    this.updateHpBar();
+  }
+
+  effectiveDamage(): number {
+    return Math.max(1, Math.round(this.damage * this.bossAuraDamageMul));
   }
 
   takeDamage(amount: number, source: DeathCause): boolean {
     if (!this.alive) return false;
     if (this.cloaked && !this.revealed && source !== 'resonance') return false;
 
-    this.hp -= amount;
+    this.hp -= amount * this.bossAuraDamageTakenMul;
     this.flashHurt();
     this.updateHpBar();
 
@@ -244,6 +314,21 @@ export class Enemy {
       onComplete: () => this.body.destroy(),
     });
     const pos = { x: this.body.x, y: this.body.y };
+    if (this.scene.textures.exists('fx-hit')) {
+      const fx = this.scene.add.image(pos.x, pos.y, 'fx-hit')
+        .setDisplaySize(this.isBoss ? 120 : 58, this.isBoss ? 60 : 30)
+        .setAngle(Math.random() * 360)
+        .setAlpha(0.9)
+        .setDepth(22);
+      this.scene.tweens.add({
+        targets: fx,
+        scale: { from: 0.45, to: 1.45 },
+        alpha: 0,
+        duration: 520,
+        ease: 'Cubic.easeOut',
+        onComplete: () => fx.destroy(),
+      });
+    }
     for (let i = 0; i < (this.isBoss ? 14 : 6); i++) {
       const p = this.scene.add.circle(pos.x, pos.y, 2 + Math.random() * 2, this.def.color, 1).setDepth(21);
       const ang = Math.random() * Math.PI * 2;
@@ -327,6 +412,10 @@ export class Enemy {
 
     if (this.slowFactor < 1 && gameTime > this.slowEndAt) this.slowFactor = 1;
     if (this.tempSpeedMul !== 1 && gameTime > this.tempSpeedEndAt) this.tempSpeedMul = 1;
+    if (gameTime < this.rootedUntil) {
+      this.pathProgress = this.getProgress();
+      return;
+    }
 
     // Obsession loop scheduling: every 3.2s a regular obsession reverses for
     // ~ 1 tile worth of distance. Bosses NEVER loop — they're relentless and
@@ -344,7 +433,7 @@ export class Enemy {
       this.scene.events.emit('obsession_loop', this);
     }
 
-    const speed = this.speed * this.slowFactor * this.tempSpeedMul;
+    const speed = this.speed * this.slowFactor * this.tempSpeedMul * this.bossAuraSpeedMul;
     const dist = (speed * gameDelta) / 1000;
 
     if (this.loopBackUntilDist >= 0) {
@@ -400,17 +489,36 @@ export class Enemy {
 
   private flashHurt(): void {
     this.disc.setStrokeStyle(2, 0xffffff, 0.95);
+    this.artSprite?.setTint(0xffffff);
+    if (this.scene.textures.exists('fx-hit')) {
+      const fx = this.scene.add.image(this.body.x, this.body.y, 'fx-hit')
+        .setDisplaySize(this.isBoss ? 78 : 42, this.isBoss ? 39 : 21)
+        .setAngle(Math.random() * 360)
+        .setAlpha(0.82)
+        .setDepth(28);
+      this.scene.tweens.add({
+        targets: fx,
+        scale: { from: 0.35, to: 1.05 },
+        alpha: 0,
+        duration: 220,
+        ease: 'Cubic.easeOut',
+        onComplete: () => fx.destroy(),
+      });
+    }
     this.scene.time.delayedCall(80, () => {
-      if (this.disc.scene) this.disc.setStrokeStyle(2, 0xffffff, 0.35);
+      if (this.disc.scene) this.disc.setStrokeStyle(2, 0xffffff, 0.55);
+      this.artSprite?.clearTint();
     });
   }
 
   private applyCloakVisual(): void {
-    this.disc.setAlpha(0.18);
-    this.glyph.setAlpha(0.18);
+    this.disc.setAlpha(this.artSprite ? 0 : 0.52);
+    this.artSprite?.setAlpha(0.52);
+    this.glyph.setAlpha(this.artSprite ? 0 : 0.52);
+    const targets = this.artSprite ? [this.artSprite] : [this.disc, this.glyph];
     this.cloakAlphaTween = this.scene.tweens.add({
-      targets: [this.disc, this.glyph],
-      alpha: { from: 0.12, to: 0.22 },
+      targets,
+      alpha: { from: 0.46, to: 0.62 },
       duration: 1300,
       yoyo: true,
       repeat: -1,
@@ -438,6 +546,21 @@ export class Enemy {
       angle: { from: -10, to: 10 },
       duration: 110, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
       onComplete: () => this.disc.setAngle(0),
+    });
+  }
+
+  private flashRootHint(): void {
+    const t = this.scene.add.text(this.body.x, this.body.y - 30, '阻挡', {
+      fontSize: '11px',
+      color: '#d9f99d',
+      fontFamily: 'inherit',
+    }).setOrigin(0.5, 1).setDepth(42).setAlpha(0);
+    this.scene.tweens.add({
+      targets: t, alpha: 0.95, y: t.y - 5, duration: 150, ease: 'Sine.easeOut',
+    });
+    this.scene.tweens.add({
+      targets: t, alpha: 0, y: t.y - 15, delay: 420, duration: 360,
+      onComplete: () => t.destroy(),
     });
   }
 

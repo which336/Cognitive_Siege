@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { loadSettings, saveSettings } from '../../settings';
 import { showSettings } from '../../ui/SettingsPanel';
 import { showHelp } from '../../ui/HelpPanel';
+import { showConfigStatus } from '../../ui/ConfigStatusPanel';
+import { getConfigLoadReport } from '../data/configLoader';
 
 export class MenuScene extends Phaser.Scene {
   private bgGroup!: Phaser.GameObjects.Container;
@@ -13,9 +15,15 @@ export class MenuScene extends Phaser.Scene {
 
   create(): void {
     const { width, height } = this.scale;
+    if (this.textures.exists('art-menu-bg')) {
+      const bg = this.add.image(width / 2, height / 2, 'art-menu-bg');
+      bg.setDisplaySize(width, height).setAlpha(0.62);
+      this.add.rectangle(width / 2, height / 2, width, height, 0x090816, 0.38);
+    }
+
     // Background gradient via two large circles
-    const bgFar = this.add.circle(width * 0.3, height * 0.7, height * 1.1, 0x231b40, 0.35);
-    const bgNear = this.add.circle(width * 0.75, height * 0.25, height * 0.7, 0x382b5e, 0.4);
+    const bgFar = this.add.circle(width * 0.3, height * 0.7, height * 1.1, 0x231b40, 0.26);
+    const bgNear = this.add.circle(width * 0.75, height * 0.25, height * 0.7, 0x382b5e, 0.28);
     this.tweens.add({ targets: bgFar, x: bgFar.x + 60, duration: 9000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     this.tweens.add({ targets: bgNear, y: bgNear.y + 40, duration: 11000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
@@ -66,7 +74,7 @@ export class MenuScene extends Phaser.Scene {
 
     // Subtitle / pitch
     this.add.text(width / 2, height * 0.46,
-      'LLM 驱动的自适应塔防——心魔会复盘、会谈判、会进化。',
+      '大模型驱动的自适应塔防——心魔会复盘、会谈判、会进化。',
       { fontFamily: 'serif', fontSize: '15px', color: '#f5f3ff' },
     ).setOrigin(0.5).setAlpha(0.85);
 
@@ -77,16 +85,27 @@ export class MenuScene extends Phaser.Scene {
     });
     startBtn.setScale(1.1);
 
-    this.makeButton(width / 2, height * 0.66, '档 案 (Codex)', () => {
+    this.makeButton(width / 2, height * 0.66, '核心机制档案', () => {
       showHelp(() => {});
     });
 
-    this.makeButton(width / 2, height * 0.74, settings.demoMode ? '设置 · 当前: 演示模式' : '设置 · 当前: LLM 在线',
+    this.makeButton(width / 2, height * 0.74, settings.demoMode ? '设置 · 当前: 演示模式' : '设置 · 当前: 大模型在线',
       () => {
         showSettings(() => {
           this.scene.restart();
         });
       });
+
+    const configReport = getConfigLoadReport();
+    this.makeButton(
+      width / 2,
+      height * 0.82,
+      configReport.status === 'ok' ? '配置校验 · 已通过' : '配置校验 · 使用默认值',
+      () => showConfigStatus(getConfigLoadReport(), () => {}),
+    );
+    if (new URLSearchParams(window.location.search).has('config')) {
+      this.time.delayedCall(250, () => showConfigStatus(getConfigLoadReport(), () => {}));
+    }
 
     // Disclaimer
     this.add.text(width / 2, height - 40,

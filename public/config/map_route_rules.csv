@@ -1,0 +1,16 @@
+min_wave,max_wave,primary_route,open_routes,note
+1,1,short,short,first wave single route
+1,1,long,long,first wave single route if LLM points long
+1,1,edge,edge,first wave single route if LLM points edge
+2,2,short,short,second wave still readable
+2,2,long,short|long,second wave opens branch
+2,2,edge,short|edge,second wave opens branch
+3,3,short,short|long,third wave introduces long
+3,3,long,short|long,third wave long pressure
+3,3,edge,short|long|edge,third wave can reveal edge if chosen
+4,5,short,short|long,pre-boss normal pressure
+4,5,long,short|long|edge,pre-boss full pressure if LLM chooses long
+4,5,edge,short|edge,pre-boss side pressure
+6,,short,short|long|edge,late game fixed three routes
+6,,long,short|long|edge,late game fixed three routes
+6,,edge,short|long|edge,late game fixed three routes

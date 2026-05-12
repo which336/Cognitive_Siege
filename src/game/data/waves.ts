@@ -4,42 +4,61 @@ import { WaveSpec } from '../../types';
 // (path bias / formation / skills / kinds) based on LLM next_strategy.
 export const TOTAL_WAVES = 10;
 
+let configuredBaseWaves: WaveSpec[] | null = null;
+
+export function setConfiguredBaseWaves(waves: WaveSpec[]): void {
+  configuredBaseWaves = cloneWaves(waves);
+}
+
+function cloneWaves(waves: WaveSpec[]): WaveSpec[] {
+  return waves.map((wave) => ({
+    ...wave,
+    spawns: wave.spawns.map((spawn) => ({
+      ...spawn,
+      skills: [...spawn.skills],
+    })),
+  }));
+}
+
 export function buildBaseWaves(): WaveSpec[] {
+  if (configuredBaseWaves) return cloneWaves(configuredBaseWaves);
+
   const w: WaveSpec[] = [];
 
-  // Wave 1: tutorial - 6 anxiety
+  // Wave 1: tutorial - readable single-route anxiety.
   w.push({
     index: 1,
     isBoss: false,
     formation: 'scattered',
     mindGift: 0,
-    spawns: Array.from({ length: 6 }, (_, i) => ({
+    spawns: Array.from({ length: 5 }, (_, i) => ({
       kind: 'anxiety' as const,
-      delayMs: 800 + i * 700,
-      hpMul: 1,
-      speedMul: 1,
+      delayMs: 900 + i * 900,
+      hpMul: 0.85,
+      speedMul: 0.9,
       pathBias: 'short' as const,
       skills: [],
     })),
   });
 
-  // Wave 2: anxiety + first depression
+  // Wave 2: anxiety + first depression. Keep the second lesson forgiving so
+  // players can recover from a weak first placement instead of spiraling.
   w.push({
     index: 2,
     isBoss: false,
     formation: 'scattered',
-    mindGift: 8,
+    mindGift: 20,
     spawns: [
-      ...Array.from({ length: 5 }, (_, i) => ({
+      ...Array.from({ length: 4 }, (_, i) => ({
         kind: 'anxiety' as const,
-        delayMs: 600 + i * 600,
-        hpMul: 1.05,
-        speedMul: 1,
+        delayMs: 800 + i * 750,
+        hpMul: 0.95,
+        speedMul: 0.95,
         pathBias: 'short' as const,
         skills: [],
       })),
-      { kind: 'depression', delayMs: 4500, hpMul: 1, speedMul: 1, pathBias: 'short', skills: [] },
-      { kind: 'depression', delayMs: 6500, hpMul: 1, speedMul: 1, pathBias: 'short', skills: [] },
+      { kind: 'depression', delayMs: 5200, hpMul: 0.9, speedMul: 1, pathBias: 'short', skills: [] },
+      { kind: 'depression', delayMs: 7600, hpMul: 0.9, speedMul: 1, pathBias: 'short', skills: [] },
     ],
   });
 
@@ -48,21 +67,21 @@ export function buildBaseWaves(): WaveSpec[] {
     index: 3,
     isBoss: false,
     formation: 'scattered',
-    mindGift: 12,
+    mindGift: 18,
     spawns: [
-      ...Array.from({ length: 4 }, (_, i) => ({
+      ...Array.from({ length: 3 }, (_, i) => ({
         kind: 'obsession' as const,
-        delayMs: 700 + i * 900,
-        hpMul: 1,
+        delayMs: 900 + i * 1100,
+        hpMul: 0.95,
         speedMul: 1,
         pathBias: 'short' as const,
         skills: [],
       })),
-      ...Array.from({ length: 4 }, (_, i) => ({
+      ...Array.from({ length: 3 }, (_, i) => ({
         kind: 'anxiety' as const,
-        delayMs: 1300 + i * 600,
-        hpMul: 1.1,
-        speedMul: 1.05,
+        delayMs: 1600 + i * 750,
+        hpMul: 1,
+        speedMul: 1,
         pathBias: 'short' as const,
         skills: [],
       })),
@@ -74,25 +93,25 @@ export function buildBaseWaves(): WaveSpec[] {
     index: 4,
     isBoss: false,
     formation: 'scattered',
-    mindGift: 14,
+    mindGift: 22,
     spawns: [
-      ...Array.from({ length: 3 }, (_, i) => ({
+      ...Array.from({ length: 2 }, (_, i) => ({
         kind: 'guilt' as const,
-        delayMs: 1200 + i * 1200,
-        hpMul: 1,
+        delayMs: 1500 + i * 1500,
+        hpMul: 0.95,
         speedMul: 1,
         pathBias: 'short' as const,
         skills: ['stealth'] as ('stealth' | 'swarm' | 'rush' | 'split' | 'taunt' | 'shield')[],
       })),
-      ...Array.from({ length: 5 }, (_, i) => ({
+      ...Array.from({ length: 4 }, (_, i) => ({
         kind: 'anxiety' as const,
-        delayMs: 600 + i * 600,
-        hpMul: 1.15,
-        speedMul: 1.05,
+        delayMs: 900 + i * 700,
+        hpMul: 1.05,
+        speedMul: 1,
         pathBias: 'short' as const,
         skills: [],
       })),
-      { kind: 'depression', delayMs: 5500, hpMul: 1.1, speedMul: 1, pathBias: 'short', skills: [] },
+      { kind: 'depression', delayMs: 6800, hpMul: 1, speedMul: 1, pathBias: 'short', skills: [] },
     ],
   });
 
@@ -116,14 +135,14 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 6: aftershock - mostly depression (LLM may rebalance)
+  // Wave 6: aftershock - introduce ptsd after the first boss.
   w.push({
     index: 6,
     isBoss: false,
     formation: 'clustered',
     mindGift: 16,
     spawns: [
-      ...Array.from({ length: 5 }, (_, i) => ({
+      ...Array.from({ length: 4 }, (_, i) => ({
         kind: 'depression' as const,
         delayMs: 700 + i * 1000,
         hpMul: 1.05,
@@ -131,7 +150,7 @@ export function buildBaseWaves(): WaveSpec[] {
         pathBias: 'short' as const,
         skills: [],
       })),
-      ...Array.from({ length: 3 }, (_, i) => ({
+      ...Array.from({ length: 2 }, (_, i) => ({
         kind: 'obsession' as const,
         delayMs: 1100 + i * 1300,
         hpMul: 1.1,
@@ -139,10 +158,18 @@ export function buildBaseWaves(): WaveSpec[] {
         pathBias: 'short' as const,
         skills: [],
       })),
+      ...Array.from({ length: 2 }, (_, i) => ({
+        kind: 'ptsd' as const,
+        delayMs: 3600 + i * 1500,
+        hpMul: 0.9,
+        speedMul: 1,
+        pathBias: 'edge' as const,
+        skills: [],
+      })),
     ],
   });
 
-  // Wave 7: introduce ptsd
+  // Wave 7: ptsd becomes part of normal pressure.
   w.push({
     index: 7,
     isBoss: false,
@@ -173,7 +200,7 @@ export function buildBaseWaves(): WaveSpec[] {
     index: 8,
     isBoss: false,
     formation: 'scattered',
-    mindGift: 20,
+    mindGift: 16,
     spawns: [
       ...Array.from({ length: 4 }, (_, i) => ({
         kind: 'anxiety' as const,
@@ -209,7 +236,7 @@ export function buildBaseWaves(): WaveSpec[] {
     index: 9,
     isBoss: false,
     formation: 'clustered',
-    mindGift: 22,
+    mindGift: 16,
     spawns: [
       ...Array.from({ length: 7 }, (_, i) => ({
         kind: 'anxiety' as const,
@@ -235,7 +262,7 @@ export function buildBaseWaves(): WaveSpec[] {
     index: 10,
     isBoss: true,
     formation: 'rear_first',
-    mindGift: 30,
+    mindGift: 20,
     spawns: [
       ...Array.from({ length: 5 }, (_, i) => ({
         kind: 'obsession' as const,

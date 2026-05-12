@@ -1,0 +1,12 @@
+key,value,note
+base_count,6,initial number of mind caches
+count_per_wave,1,extra caches per wave index after wave 1
+max_count_bonus,4,max extra caches from wave progression
+base_hp,54,base cache HP
+hp_per_wave,8,cache HP increase per wave index after wave 1
+hp_random,18,random HP bonus range 0 to value-1
+base_reward,18,base mind reward when destroyed
+reward_per_wave,3,reward increase per wave index after wave 1
+reward_wave_cap,18,max reward increase from wave progression
+reward_random,10,random reward bonus range 0 to value-1
+near_build_radius_sq,10,cache must be near current build cells within squared grid distance

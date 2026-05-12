@@ -8,9 +8,9 @@ export interface TowerActionPopupOpts {
   y: number;
   kind: TowerKind;
   level: number;
-  damage: number;
-  range: number;
-  fireRate: number;
+  damageLabel: string;
+  rangeLabel: string;
+  fireRateLabel: string;
   upgradeCost: number | null;   // null when maxed
   sellRefund: number;
   canAfford: boolean;
@@ -44,9 +44,9 @@ export function showTowerActionPopup(opts: TowerActionPopupOpts): { close: () =>
   ]);
 
   const stats = el('div', { cls: 'cs-tower-popup-stats' }, [
-    el('div', { html: `<span>伤害</span><b>${opts.damage.toFixed(1)}</b>` }),
-    el('div', { html: `<span>射程</span><b>${Math.round(opts.range)}</b>` }),
-    el('div', { html: `<span>射速</span><b>${opts.fireRate.toFixed(2)}/s</b>` }),
+    el('div', { html: `<span>伤害</span><b>${opts.damageLabel}</b>` }),
+    el('div', { html: `<span>射程</span><b>${opts.rangeLabel}</b>` }),
+    el('div', { html: `<span>射速</span><b>${opts.fireRateLabel}</b>` }),
   ]);
 
   const actions = el('div', { cls: 'cs-tower-popup-actions' });

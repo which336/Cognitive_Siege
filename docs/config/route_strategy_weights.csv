@@ -1,0 +1,4 @@
+key,value,note
+strategy_route_weight,0.7,probability to follow Review Agent path_weight_shift
+kind_preference_weight,0.2,probability to follow enemy route personality
+random_route_weight,0.1,remaining probability uses random open route

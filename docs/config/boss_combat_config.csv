@@ -1,0 +1,23 @@
+category,key,value,note
+global,summon_interval_ms,5000,boss minion summon interval
+global,core_tick_interval_ms,900,boss core attack tick interval
+global,core_damage_factor,0.35,boss effective damage factor while attacking core
+global,core_min_damage,2,min damage per boss core tick
+wave_skill,5,anxiety_core,wave 5 boss skill
+wave_skill,10,depression_core,wave 10 boss skill
+skill_display,anxiety_core,焦虑之核,boss skill display name
+skill_display,depression_core,执念,boss skill display name
+skill_aura_speed_mul,anxiety_core,1.10,anxiety core global enemy speed multiplier
+skill_enraged_damage_mul,anxiety_core,1.20,anxiety core enraged enemy damage multiplier
+skill_shield_max_hp_ratio,depression_core,0.10,depression core shield ratio
+skill_enraged_damage_taken_mul,depression_core,0.80,depression core enraged damage taken multiplier
+minion_kind,anxiety_core,anxiety,minion kind
+minion_hp_mul,anxiety_core,1.05,minion HP multiplier
+minion_speed_mul,anxiety_core,1.20,minion speed multiplier
+minion_path_bias,anxiety_core,short,minion route bias
+minion_skills,anxiety_core,rush,minion skills separated by |
+minion_kind,depression_core,depression,minion kind
+minion_hp_mul,depression_core,1.05,minion HP multiplier
+minion_speed_mul,depression_core,1.00,minion speed multiplier
+minion_path_bias,depression_core,short,minion route bias
+minion_skills,depression_core,,minion skills separated by |

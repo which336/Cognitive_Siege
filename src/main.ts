@@ -21,7 +21,7 @@ const config: Phaser.Types.Core.GameConfig = {
   render: {
     antialias: true,
     pixelArt: false,
-    roundPixels: false,
+    roundPixels: true,
   },
   scene: [BootScene, MenuScene, BattleScene],
   fps: { target: 60, forceSetTimeOut: false },

@@ -12,11 +12,16 @@ export interface NegotiationPanelHandle {
 export function openNegotiation(persona: BossPersona, turnIndex: number, totalTurns: number): NegotiationPanelHandle {
   const panel = el('div', { cls: 'cs-panel wide' });
 
-  panel.appendChild(el('div', { cls: 'cs-panel-title', text: '对话 / NEGOTIATION' }));
-  panel.appendChild(el('div', { cls: 'cs-panel-sub', text: `WAVE BOSS · ${persona.displayName}` }));
+  panel.appendChild(el('div', { cls: 'cs-panel-title', text: '首领谈判' }));
+  panel.appendChild(el('div', { cls: 'cs-panel-sub', text: `首领谈判 · ${persona.displayName}` }));
 
   const dialogRow = el('div', { cls: 'cs-dialog-row' });
-  const portrait = el('div', { cls: 'cs-dialog-portrait', text: persona.emoji });
+  const bossPortrait = bossPortraitUrl(persona);
+  const portrait = el('div', {
+    cls: bossPortrait ? 'cs-dialog-portrait image' : 'cs-dialog-portrait',
+    text: bossPortrait ? '' : persona.emoji,
+    attrs: bossPortrait ? { style: `background-image:url("${bossPortrait}")` } : undefined,
+  });
   const dialogBox = el('div', { attrs: { style: 'flex:1; min-width:0;' } });
   const nameEl = el('div', { cls: 'cs-dialog-name', text: persona.displayName });
   const turnLabel = el('div', {
@@ -49,7 +54,7 @@ export function openNegotiation(persona: BossPersona, turnIndex: number, totalTu
       textEl.textContent = '';
       await typewriter(textEl, turn.bossLine, 32);
       for (const c of turn.choices) {
-        const tagSpan = `<span class="tag ${c.tag}">${c.tag.toUpperCase()}</span>`;
+        const tagSpan = `<span class="tag ${c.tag}">${choiceTagLabel(c.tag)}</span>`;
         const btn = el('button', {
           cls: 'cs-choice',
           html: tagSpan + escapeHtml(c.text),
@@ -69,13 +74,27 @@ export function openNegotiation(persona: BossPersona, turnIndex: number, totalTu
       panel.appendChild(el('div', { cls: 'cs-actions' }, [
         el('button', {
           cls: 'cs-btn primary',
-          text: '迎战 / Engage',
+          text: '迎战',
           on: { click: () => { handle.close(); onContinue(); } },
         }),
       ]));
     },
     close: () => handle.close(),
   };
+}
+
+function bossPortraitUrl(persona: BossPersona): string | null {
+  if (persona.kindHint === 'anxiety') return 'assets/art/boss-anxiety.jpg';
+  if (persona.kindHint === 'obsession') return 'assets/art/boss-obsession.jpg';
+  return null;
+}
+
+function choiceTagLabel(tag: ChoiceTag): string {
+  return ({
+    empathy: '共情',
+    confront: '对峙',
+    deceive: '欺骗',
+  } as Record<ChoiceTag, string>)[tag];
 }
 
 function escapeHtml(s: string): string {

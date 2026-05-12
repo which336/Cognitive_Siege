@@ -5,14 +5,21 @@ import {
   EnemySpawnSpec,
   Formation,
   PathBias,
+  SkillFlag,
 } from '../../types';
+import {
+  clampAggressionForWave,
+  getAllowedEnemyKindsForWave,
+  getAllowedSkillsForWave,
+} from '../data/configLoader';
 
 /**
  * Applies a NextStrategy from the review agent to a base WaveSpec.
  *
  * Mutations:
- *  - path_weight_shift overrides each spawn's pathBias (the wave system
- *    consults this when picking which path variant to follow)
+ *  - path_weight_shift overrides each spawn's pathBias. The wave system treats
+ *    that as a strong route weight, then mixes in enemy route personality and
+ *    a small amount of per-spawn randomness.
  *  - formation overrides spawn timing pattern (clustered = burst, scattered = even)
  *  - skill_priority adds tags to spawns probabilistically
  *  - aggression scales hp/speed multipliers and shrinks delays
@@ -26,33 +33,46 @@ export interface ApplyResult {
 
 const isBossSpawn = (s: EnemySpawnSpec): boolean => s.hpMul >= 5;
 
+const KIND_FRONT_RANK: Record<EnemyKind, number> = {
+  depression: 50,
+  anxiety: 42,
+  obsession: 34,
+  guilt: 24,
+  ptsd: 18,
+};
+
 export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult {
   const changes: string[] = [];
   const cloned: WaveSpec = {
     ...base,
+    formation: strat.formation,
     spawns: base.spawns.map(s => ({ ...s, skills: [...s.skills] })),
   };
 
-  // 1) Path bias
+  // 1) Path bias. Boss identity/stats stay intact, and the active route is part
+  // of the wave projection. Individual spawns still make weighted route picks
+  // at runtime so a wave can split across open branches.
   if (cloned.spawns[0]?.pathBias !== strat.path_weight_shift) {
     for (const s of cloned.spawns) {
-      if (!isBossSpawn(s)) s.pathBias = strat.path_weight_shift;
+      s.pathBias = strat.path_weight_shift;
     }
     changes.push(pathBiasLabel(strat.path_weight_shift));
   }
 
-  // 2) Formation -> rewrite delays
-  applyFormation(cloned, strat.formation);
-  changes.push(formationLabel(strat.formation));
+  // 2) Reinforce later waves before timing is assigned. Pressure should come
+  // from more bodies and better composition, not only higher stats.
+  const added = cloned.index >= 5 ? reinforceWave(cloned, strat) : 0;
+  if (added > 0) changes.push(`增援单位 +${added}`);
 
   // 3) Skill priority -> tag a fraction of spawns
-  if (strat.skill_priority.length) {
-    const stamp = strat.skill_priority.slice(0, 2);
+  const allowedSkills = getAllowedSkillsForWave(cloned.index, strat.skill_priority);
+  if (allowedSkills.length) {
+    const stamp = allowedSkills.slice(0, 2);
     let tagged = 0;
     for (const s of cloned.spawns) {
       if (isBossSpawn(s)) continue;
-      // 60% of non-boss spawns get the new tags
-      if (Math.random() < 0.6) {
+      const chance = cloned.index <= 4 ? 0.28 : 0.6;
+      if (Math.random() < chance) {
         for (const t of stamp) if (!s.skills.includes(t)) s.skills.push(t);
         tagged++;
       }
@@ -61,7 +81,7 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
   }
 
   // 4) Aggression scales
-  const a = strat.aggression;
+  const a = clampAggressionForWave(cloned.index, strat.aggression);
   // map -1..1 -> hp 0.85..1.25 ; speed 0.9..1.2 ; delay 1.25..0.7
   const hpMulX = 1 + 0.2 * a;
   const spdMulX = 1 + 0.15 * a;
@@ -77,16 +97,20 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
   }
 
   // 5) Preferred kinds -> swap some non-boss spawns
-  if (strat.preferred_kinds.length) {
-    const fillerIdx: number[] = [];
-    cloned.spawns.forEach((s, i) => { if (!isBossSpawn(s)) fillerIdx.push(i); });
+  const preferredKinds = getAllowedEnemyKindsForWave(cloned.index, strat.preferred_kinds);
+  if (preferredKinds.length && cloned.index >= 5) {
+    const fillerIdx = cloned.spawns
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => !isBossSpawn(s))
+      .sort((a, b) => spawnFrontRank(b.s) - spawnFrontRank(a.s))
+      .map(({ i }) => i);
     const swapCount = Math.min(fillerIdx.length, Math.ceil(fillerIdx.length * 0.45));
     const swapped: Record<EnemyKind, number> = {
       anxiety: 0, depression: 0, obsession: 0, guilt: 0, ptsd: 0,
     };
     for (let n = 0; n < swapCount; n++) {
-      const pickIdx = fillerIdx[Math.floor(Math.random() * fillerIdx.length)];
-      const newKind = strat.preferred_kinds[n % strat.preferred_kinds.length];
+      const pickIdx = fillerIdx[n];
+      const newKind = preferredKinds[n % preferredKinds.length];
       cloned.spawns[pickIdx].kind = newKind;
       swapped[newKind]++;
     }
@@ -97,56 +121,129 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
     if (list) changes.push(`阵容变化：${list}`);
   }
 
+  // 6) Formation -> rewrite delays after composition is finalized. This keeps
+  // review-driven formation changes meaningful after kind swaps/reinforcements.
+  applyFormation(cloned, strat.formation);
+  changes.push(formationLabel(strat.formation));
+
   return { applied: cloned, changes };
 }
 
 function applyFormation(w: WaveSpec, f: Formation): void {
-  const fillers = w.spawns.filter(s => !isBossSpawn(s));
-  const baseStart = fillers.length ? Math.min(...fillers.map(s => s.delayMs)) : 600;
-  const totalSpan = fillers.length ? Math.max(...fillers.map(s => s.delayMs)) - baseStart : 4000;
+  const ordered = tacticalSpawnOrder(w.spawns);
+  const baseStart = ordered.length ? Math.min(...ordered.map(s => s.delayMs)) : 600;
+  const totalSpan = ordered.length ? Math.max(...ordered.map(s => s.delayMs)) - baseStart : 4000;
 
   switch (f) {
     case 'clustered': {
-      // tight bursts of 3 with gaps
-      fillers.sort((a, b) => a.delayMs - b.delayMs);
+      // Tight bursts; each burst still starts with durable frontliners.
       let t = baseStart;
-      for (let i = 0; i < fillers.length; i++) {
-        fillers[i].delayMs = t;
+      for (let i = 0; i < ordered.length; i++) {
+        ordered[i].delayMs = t;
         if ((i + 1) % 3 === 0) t += 1400;
         else t += 200;
       }
       break;
     }
     case 'scattered': {
-      // even spread across the same total span
-      fillers.sort((a, b) => a.delayMs - b.delayMs);
-      const step = fillers.length > 1 ? totalSpan / (fillers.length - 1) : 0;
-      fillers.forEach((s, i) => { s.delayMs = Math.round(baseStart + i * step); });
+      // Even spread across the same total span, front to back.
+      const step = ordered.length > 1 ? totalSpan / (ordered.length - 1) : 0;
+      ordered.forEach((s, i) => { s.delayMs = Math.round(baseStart + i * step); });
       break;
     }
     case 'wedge': {
-      // accelerating spawns
-      fillers.sort((a, b) => a.delayMs - b.delayMs);
+      // Accelerating spawns, with the front screen entering before backline.
       let t = baseStart;
-      let gap = Math.max(220, Math.round(totalSpan / Math.max(1, fillers.length) * 1.1));
-      for (let i = 0; i < fillers.length; i++) {
-        fillers[i].delayMs = t;
+      let gap = Math.max(220, Math.round(totalSpan / Math.max(1, ordered.length) * 1.1));
+      for (let i = 0; i < ordered.length; i++) {
+        ordered[i].delayMs = t;
         t += gap;
         gap = Math.max(180, Math.round(gap * 0.92));
       }
       break;
     }
     case 'rear_first': {
-      // reverse order: heaviest first
-      fillers.sort((a, b) => (b.hpMul - a.hpMul) || (a.delayMs - b.delayMs));
+      // Rear-pressure still needs a screen: frontliners enter first, then
+      // fragile/specialized units ride behind them.
       let t = baseStart;
-      for (let i = 0; i < fillers.length; i++) {
-        fillers[i].delayMs = t;
+      for (let i = 0; i < ordered.length; i++) {
+        ordered[i].delayMs = t;
         t += 600 + Math.round(Math.random() * 200);
       }
       break;
     }
   }
+}
+
+function reinforceWave(w: WaveSpec, strat: NextStrategy): number {
+  const nonBoss = w.spawns.filter(s => !isBossSpawn(s));
+  if (!nonBoss.length) return 0;
+
+  const wavePressure = Math.max(0, w.index - 1);
+  const aggressionPressure = Math.max(0, Math.round(strat.aggression * 3));
+  const latePressure = Math.max(0, w.index - 7);
+  const targetNonBoss = nonBoss.length + Math.floor(wavePressure * 0.8) + latePressure * 2 + aggressionPressure;
+  const addCount = Math.min(14, Math.max(0, targetNonBoss - nonBoss.length));
+  if (addCount <= 0) return 0;
+
+  const templates = tacticalSpawnOrder(nonBoss);
+  const firstDelay = Math.min(...nonBoss.map(s => s.delayMs));
+  const lastDelay = Math.max(...nonBoss.map(s => s.delayMs));
+
+  for (let i = 0; i < addCount; i++) {
+    const template = templates[i % templates.length];
+    const kind = strat.preferred_kinds[i % strat.preferred_kinds.length] ?? template.kind;
+    const delayMs = Math.round(firstDelay + ((lastDelay - firstDelay) * (i + 1)) / (addCount + 1));
+    w.spawns.push({
+      ...template,
+      kind,
+      delayMs,
+      hpMul: +(template.hpMul * 0.96).toFixed(3),
+      speedMul: +(template.speedMul * 0.98).toFixed(3),
+      skills: [...template.skills],
+    });
+  }
+
+  return addCount;
+}
+
+function kindsAllowedForWave(waveIndex: number, kinds: EnemyKind[]): EnemyKind[] {
+  const allowed: EnemyKind[] = ['anxiety'];
+  if (waveIndex >= 2) allowed.push('depression');
+  if (waveIndex >= 3) allowed.push('obsession');
+  if (waveIndex >= 4) allowed.push('guilt');
+  if (waveIndex >= 6) allowed.push('ptsd');
+  return kinds.filter((kind) => allowed.includes(kind));
+}
+
+function skillsAllowedForWave(waveIndex: number, skills: SkillFlag[]): SkillFlag[] {
+  return skills.filter((skill) => {
+    if (skill === 'stealth') return waveIndex >= 4;
+    if (skill === 'shield' || skill === 'taunt') return waveIndex >= 5;
+    if (skill === 'swarm' || skill === 'split') return waveIndex >= 6;
+    return true;
+  });
+}
+
+function tacticalSpawnOrder(spawns: EnemySpawnSpec[]): EnemySpawnSpec[] {
+  const nonBoss = spawns.filter(s => !isBossSpawn(s));
+  const bosses = spawns.filter(isBossSpawn);
+  const ordered = [...nonBoss].sort((a, b) => spawnFrontRank(b) - spawnFrontRank(a));
+  for (const boss of bosses.sort((a, b) => spawnFrontRank(b) - spawnFrontRank(a))) {
+    ordered.splice(Math.min(2, ordered.length), 0, boss);
+  }
+  return ordered;
+}
+
+function spawnFrontRank(s: EnemySpawnSpec): number {
+  return (
+    KIND_FRONT_RANK[s.kind] +
+    s.hpMul * 12 +
+    (s.skills.includes('shield') ? 35 : 0) +
+    (s.skills.includes('rush') ? 8 : 0) -
+    (s.skills.includes('stealth') ? 10 : 0) +
+    (isBossSpawn(s) ? 90 : 0)
+  );
 }
 
 function pathBiasLabel(b: PathBias): string {

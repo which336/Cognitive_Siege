@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: './',
+  base: '/Cognitive_Siege/',
   server: {
     port: 5180,
     open: true,

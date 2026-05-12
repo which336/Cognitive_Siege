@@ -9,12 +9,14 @@
     "preview": "vite preview --port 4173",
     "typecheck": "tsc --noEmit",
     "audio:generate": "node ./scripts/generate-audio.mjs",
+    "article:docx": "node ./scripts/generate-wechat-article-docx.mjs",
     "deploy:pages": "npm run build && node ./scripts/deploy-pages.mjs"
   },
   "dependencies": {
     "phaser": "^3.80.1"
   },
   "devDependencies": {
+    "docx": "^9.5.0",
     "typescript": "^5.4.5",
     "vite": "^5.2.11"
   }
