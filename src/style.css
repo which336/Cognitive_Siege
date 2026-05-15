@@ -1,4 +1,4 @@
-/* ================== Cognitive Siege - Surreal Night Theme ================== */
+/* ================== 认知围城：超现实夜色主题 ================== */
 
 :root {
   --bg-deep: #0b0a18;
@@ -62,7 +62,7 @@ html, body {
   border-radius: 4px;
 }
 
-/* Loading screen */
+/* 加载界面 */
 #loading-screen {
   position: fixed;
   inset: 0;
@@ -116,7 +116,7 @@ html, body {
   100% { transform: translateX(100%); }
 }
 
-/* DOM overlays (settings, review, dialog) */
+/* DOM 弹层：设置、复盘、对话 */
 .cs-overlay {
   position: fixed;
   inset: 0;
@@ -135,6 +135,7 @@ html, body {
 }
 
 .cs-panel {
+  position: relative;
   background: linear-gradient(180deg, var(--bg-mid), var(--bg-deep));
   border: 1px solid rgba(167, 139, 250, 0.3);
   border-radius: 8px;
@@ -146,6 +147,29 @@ html, body {
               0 0 1px rgba(167, 139, 250, 0.5) inset;
   font-family: var(--font-ui);
   font-weight: 400;
+}
+
+.cs-panel-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  margin: -18px -24px 0 12px;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: 4px;
+  background: rgba(20, 18, 38, 0.92);
+  color: var(--text-primary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.cs-panel-close:hover {
+  background: rgba(167, 139, 250, 0.28);
+  border-color: var(--accent-violet);
 }
 
 .cs-panel.wide {
@@ -197,9 +221,8 @@ html, body {
   transition: border-color 0.2s, background 0.2s;
 }
 
-/* Force native <select> popup to use dark UA chrome on every OS so its
-   options aren't white-on-white. The popup itself is browser-rendered and
-   mostly ignores CSS, but `color-scheme: dark` flips it system-wide. */
+/* 强制原生 <select> 弹层使用深色系统外观，避免选项白底白字。
+   弹层本身由浏览器渲染，通常不吃普通 CSS；color-scheme: dark 可切换系统级配色。 */
 .cs-select {
   color-scheme: dark;
   appearance: none;
@@ -213,7 +236,7 @@ html, body {
   cursor: pointer;
 }
 
-/* Belt-and-suspenders: a few browsers DO honor option colors. */
+/* 兼容兜底：少数浏览器会读取 option 颜色。 */
 .cs-select option {
   background-color: #1a1633;
   color: #e7e6f1;
@@ -272,6 +295,18 @@ html, body {
   border-top: 1px solid rgba(167, 139, 250, 0.15);
 }
 
+.cs-actions.sticky {
+  position: sticky;
+  bottom: -32px;
+  z-index: 3;
+  margin-left: -40px;
+  margin-right: -40px;
+  margin-bottom: -32px;
+  padding: 18px 40px 32px;
+  background: linear-gradient(180deg, rgba(11, 10, 24, 0.72), rgba(11, 10, 24, 0.98) 36%);
+  pointer-events: auto;
+}
+
 .cs-btn {
   background: rgba(167, 139, 250, 0.12);
   border: 1px solid rgba(167, 139, 250, 0.4);
@@ -316,7 +351,7 @@ html, body {
   color: var(--danger);
 }
 
-/* Review panel specific */
+/* 复盘面板 */
 .cs-monologue {
   font-family: var(--font-ui);
   font-style: normal;
@@ -646,7 +681,7 @@ html, body {
   }
 }
 
-/* Dialogue / negotiation */
+/* 对话 / 谈判 */
 .cs-dialog-portrait {
   width: 84px;
   height: 84px;
@@ -733,7 +768,7 @@ html, body {
 .cs-choice .tag.confront { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
 .cs-choice .tag.deceive { background: rgba(167, 139, 250, 0.2); color: var(--accent-violet); }
 
-/* LLM thinking spinner */
+/* LLM 思考动画 */
 .cs-thinking {
   display: flex;
   align-items: center;
@@ -759,7 +794,7 @@ html, body {
   50% { opacity: 1; transform: scale(1.3); box-shadow: 0 0 16px var(--accent-violet); }
 }
 
-/* Vignette card (director) */
+/* 开场剧情卡片 */
 .cs-vignette {
   font-family: var(--font-cjk);
   font-size: 16px;
@@ -787,7 +822,7 @@ html, body {
 .cs-vignette::before { top: 0; left: 8px; }
 .cs-vignette::after { bottom: -20px; right: 12px; }
 
-/* Disclaimer */
+/* 免责声明 */
 .cs-disclaimer {
   margin-top: 16px;
   padding: 10px 14px;
@@ -879,7 +914,7 @@ html, body {
   overflow-wrap: anywhere;
 }
 
-/* Scrollbar */
+/* 滚动条 */
 .cs-panel::-webkit-scrollbar { width: 6px; }
 .cs-panel::-webkit-scrollbar-track { background: transparent; }
 .cs-panel::-webkit-scrollbar-thumb {
@@ -887,7 +922,7 @@ html, body {
   border-radius: 3px;
 }
 
-/* Help table for tower/enemy info */
+/* 帮助面板中的塔 / 心魔信息表 */
 .cs-help-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -914,7 +949,7 @@ html, body {
   line-height: 1.7;
 }
 
-/* ================== Tower action popup (upgrade / sell) ================== */
+/* ================== 塔操作弹层：升级 / 出售 ================== */
 
 .cs-tower-popup-backdrop {
   position: fixed;

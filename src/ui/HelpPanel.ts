@@ -3,8 +3,8 @@ import { ALL_TOWER_KINDS, TOWER_DEFS } from '../game/data/towers';
 import { el, mountOverlay } from './dom';
 
 /**
- * Codex / help overlay. Keep it focused on the portfolio-worthy core systems,
- * not on basic controls that are already visible in the HUD.
+ * 机制档案弹层。重点解释值得展示的核心系统；
+ * 已经在 HUD 中可见的基础控制只做简短说明。
  */
 export function showHelp(onClose: () => void): { close: () => void } {
   const panel = el('div', { cls: 'cs-panel wide' });
@@ -36,7 +36,7 @@ export function showHelp(onClose: () => void): { close: () => void } {
     el('div', {
       cls: 'desc',
       text:
-        '发亮路线代表本波可能进攻路径。前几波路线会逐步开放；后续复盘智能体会改变路线偏好，' +
+        '发亮路线代表本波可能进攻路径。教学关会逐步开放；进阶关以本关地图规则和复盘后的实际亮线为准，' +
         '地图会随策略重构。',
     }),
   ]));
@@ -90,6 +90,54 @@ export function showHelp(onClose: () => void): { close: () => void } {
   panel.appendChild(el('div', {
     cls: 'cs-section-label',
     attrs: { style: 'margin-top:24px;' },
+    text: '地图物件机制',
+  }));
+  const mapElementGrid = el('div', { cls: 'cs-help-grid' });
+  mapElementGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
+    el('div', { cls: 'name', text: '呼吸阀' }),
+    el('div', {
+      cls: 'desc',
+      text:
+        '第 2 关出现。蓝色圆阀每 6 秒切换吸气/呼气：吸气让附近心魔加速，呼气让附近心魔更容易受伤。',
+    }),
+  ]));
+  mapElementGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
+    el('div', { cls: 'name', text: '镜门' }),
+    el('div', {
+      cls: 'desc',
+      text:
+        '第 3 关出现。心魔穿过镜门后，会在约 5.5 秒后从配对路线生成半血回声体。镜门可被塔攻击，拆掉任意一侧会关闭本波后续回声。',
+    }),
+  ]));
+  mapElementGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
+    el('div', { cls: 'name', text: '枯井' }),
+    el('div', {
+      cls: 'desc',
+      text:
+        '第 4 关出现。枯井是高血量资源点，存活时压制周围塔位和普通残堆，压制范围内不能建塔或塑形；击破后返还大量念力并释放塔位。',
+    }),
+  ]));
+  mapElementGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
+    el('div', { cls: 'name', text: '裂隙节点' }),
+    el('div', {
+      cls: 'desc',
+      text:
+        '第 5 关出现。裂隙会让边路心魔在范围内短时加速。边界桩放在裂隙附近可以压制加速；裂隙节点也可被塔拆掉。',
+    }),
+  ]));
+  mapElementGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
+    el('div', { cls: 'name', text: '审判碑' }),
+    el('div', {
+      cls: 'desc',
+      text:
+        '第 6 关出现。范围内首领、嘲讽或护盾精英会获得护盾、嘲讽优先级和减伤。塔会优先拆碑，也可以把边界桩放在光环外侧，让精英停在范围外。',
+    }),
+  ]));
+  panel.appendChild(mapElementGrid);
+
+  panel.appendChild(el('div', {
+    cls: 'cs-section-label',
+    attrs: { style: 'margin-top:24px;' },
     text: '智能体系统',
   }));
   const agentGrid = el('div', { cls: 'cs-help-grid' });
@@ -100,7 +148,7 @@ export function showHelp(onClose: () => void): { close: () => void } {
       text:
         '每波结束后，幸存的心魔会公开回看自己的失败：在哪儿被打、被谁打、有没有用对技能。' +
         '它们会发布一段"内心独白"和一份结构化策略（路径偏好/编队/技能优先级/侵略性等），' +
-        '下一波会按路线权重真实分路：多数服从复盘倾向，一部分按心魔本性走，少量随机扰动。',
+        '下一波会按路线权重真实分路，地图机制会补充开放路线和场景压力。',
     }),
   ]));
   agentGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
@@ -118,8 +166,8 @@ export function showHelp(onClose: () => void): { close: () => void } {
     el('div', {
       cls: 'desc',
       text:
-        '每一夜开场，由"叙事调度智能体"根据当前心魔氛围生成一段短小的小说式情境，' +
-        '把"为什么今晚是这些心魔"埋进剧情里。',
+        '每波开场，由"叙事调度智能体"根据当前心魔氛围生成一段短小的小说式情境，' +
+        '把"为什么本轮是这些心魔"埋进剧情里。',
     }),
   ]));
   panel.appendChild(agentGrid);
@@ -154,8 +202,8 @@ export function showHelp(onClose: () => void): { close: () => void } {
     el('div', {
       cls: 'desc',
       text:
-        '焦虑之核出场后，全场心魔 +10% 移速；狂暴时额外 +20% 核心/路障攻击力，并每 5 秒在当前位置召唤焦虑·疾走者。' +
-        '执念出场后，全场心魔获得 +10% 最大生命护盾；狂暴时额外获得 20% 减伤，并每 5 秒召唤抑郁·重雾。战斗顶部会持续显示当前首领技能。',
+        '焦虑首领会提供全场移速光环，狂暴时额外提高核心/路障攻击力，并定时召唤焦虑。' +
+        '其他首领会提供护盾，狂暴时获得减伤，并定时召唤与自己类型一致的心魔。战斗顶部会持续显示当前首领技能。',
     }),
   ]));
   opsGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
@@ -174,6 +222,15 @@ export function showHelp(onClose: () => void): { close: () => void } {
       text:
         '塑形不再按波次免费发放，而是每次消耗念力，把普通阻塞格改造成可建造格。' +
         '阻塞区的念力残堆不能直接塑形；塔在没有心魔目标时会攻击残堆，打破后返还念力。',
+    }),
+  ]));
+  opsGrid.appendChild(el('div', { cls: 'cs-help-card' }, [
+    el('div', { cls: 'name', text: '审判碑' }),
+    el('div', {
+      cls: 'desc',
+      text:
+        '第 6 章会出现审判碑。范围内的首领、嘲讽或护盾精英会吸引塔火力，获得 10% 最大生命护盾，' +
+        '并受到约 25% 更少伤害。塔会优先攻击审判碑；先拆碑，或把边界桩放在光环外侧，让精英停在范围外。',
     }),
   ]));
   opsGrid.appendChild(el('div', { cls: 'cs-help-card' }, [

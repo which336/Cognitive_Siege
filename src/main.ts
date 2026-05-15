@@ -36,9 +36,9 @@ window.addEventListener('load', () => {
   Sound.setMuted(settings.muted);
   const game = new Phaser.Game(config);
   window.__cognitiveSiegeGame = game;
-  // First user gesture is required to unlock Web Audio.
+  // 浏览器需要首次用户手势后才能解锁 Web Audio。
   const unlock = () => {
-    Sound.play('tower_fire'); // tiny silent-ish ping to prime context
+    Sound.play('tower_fire'); // 轻量触发一次音效，预热音频上下文。
     window.removeEventListener('pointerdown', unlock);
     window.removeEventListener('keydown', unlock);
   };

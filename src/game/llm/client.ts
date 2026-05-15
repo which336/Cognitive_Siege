@@ -7,7 +7,7 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   messages: ChatMessage[];
-  /** OpenAI-style response_format hint. Falls back to plain text if backend ignores it. */
+  /** OpenAI 风格的 response_format 提示；后端忽略时仍按普通文本处理。 */
   responseFormat?: 'text' | 'json';
   temperature?: number;
   maxTokens?: number;
@@ -20,10 +20,10 @@ export interface ChatResult {
 }
 
 /**
- * Minimal OpenAI-compatible chat client.
+ * 最小化的 OpenAI 兼容 Chat Client。
  *
- * Compatible with: OpenAI, DeepSeek, ZhipuAI (智谱), Moonshot/Kimi, Ollama (with /v1).
- * The /v1 part is part of `apiBase` so users can paste full base URLs.
+ * 兼容 OpenAI、DeepSeek、智谱、Moonshot/Kimi、Ollama（/v1）。
+ * /v1 被视为 apiBase 的一部分，用户可以直接粘贴完整 base URL。
  */
 export async function chatCompletion(
   settings: UserSettings,
@@ -75,12 +75,12 @@ export async function chatCompletion(
   return { content, raw: json };
 }
 
-/** Pulls the first balanced JSON object out of a string (handles ```json fences). */
+/** 从字符串中提取第一个括号平衡的 JSON 对象，兼容 ```json 代码块。 */
 export function extractJson<T = unknown>(s: string): T | null {
   if (!s) return null;
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
   const candidate = fence ? fence[1] : s;
-  // Find first { and balance braces
+  // 从第一个 { 开始做括号配平，避免模型在 JSON 前后夹带短句。
   const start = candidate.indexOf('{');
   if (start < 0) return null;
   let depth = 0;

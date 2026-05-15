@@ -1,14 +1,14 @@
 """
-Generate polished WAV sound effects for Cognitive Siege.
+为《认知围城》生成打磨过的 WAV 音效。
 
-The game can use downloaded CC0 audio packs, but this script keeps the repo
-self-contained: it renders a cohesive "dream tower defense" sound palette with
-soft chimes, airy noise, short delays and gentle limiting using Python stdlib.
-Run:
+游戏也可以接入下载的 CC0 音效包；这个脚本让仓库保持自给自足：
+仅用 Python 标准库渲染一套统一的“梦境塔防”声音调色盘，包括柔和钟声、
+空气感噪声、短延迟和轻柔限幅。
+运行：
 
     python generate_sounds.py
 
-Output:
+输出：
     public/assets/audio/*.wav
 """
 
@@ -68,7 +68,7 @@ def envelope(t: float, dur: float, attack: float, release: float) -> float:
         return t / a
     if t > dur - r:
         return max(0.0, (dur - t) / r)
-    # A slow decay keeps chimes musical without feeling like a raw oscillator.
+    # 缓慢衰减让钟声更有音乐性，避免听起来像裸振荡器。
     body = (t - a) / max(0.001, dur - a - r)
     return 1.0 - 0.28 * body
 

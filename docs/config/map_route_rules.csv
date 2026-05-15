@@ -1,16 +1,82 @@
-min_wave,max_wave,primary_route,open_routes,note
-1,1,short,short,first wave single route
-1,1,long,long,first wave single route if LLM points long
-1,1,edge,edge,first wave single route if LLM points edge
-2,2,short,short,second wave still readable
-2,2,long,short|long,second wave opens branch
-2,2,edge,short|edge,second wave opens branch
-3,3,short,short|long,third wave introduces long
-3,3,long,short|long,third wave long pressure
-3,3,edge,short|long|edge,third wave can reveal edge if chosen
-4,5,short,short|long,pre-boss normal pressure
-4,5,long,short|long|edge,pre-boss full pressure if LLM chooses long
-4,5,edge,short|edge,pre-boss side pressure
-6,,short,short|long|edge,late game fixed three routes
-6,,long,short|long|edge,late game fixed three routes
-6,,edge,short|long|edge,late game fixed three routes
+level_id,min_wave,max_wave,primary_route,open_routes,note
+level_1,1,1,short,short,first readable route
+level_1,1,1,long,long,first readable route
+level_1,1,1,edge,edge,first readable route
+level_1,2,2,short,short,second readable route
+level_1,2,2,long,short|long,second branch
+level_1,2,2,edge,short|edge,second edge branch
+level_1,3,3,short,short|long,rule test
+level_1,3,3,long,short|long,rule test
+level_1,3,3,edge,short|long|edge,rule test
+level_1,4,5,short,short|long,pre boss
+level_1,4,5,long,short|long|edge,pre boss
+level_1,4,5,edge,short|edge,pre boss
+level_1,6,,short,short|long|edge,late full pressure
+level_1,6,,long,short|long|edge,late full pressure
+level_1,6,,edge,short|long|edge,late full pressure
+level_2,1,1,short,short,first readable route
+level_2,1,1,long,long,first readable route
+level_2,1,1,edge,edge,first readable route
+level_2,2,2,short,short|long,second wave opens short and long breathing pressure
+level_2,2,2,long,short|long,second branch
+level_2,2,2,edge,short|edge,second edge branch
+level_2,3,3,short,short|edge,third wave opens edge split pressure
+level_2,3,3,long,short|long,rule test
+level_2,3,3,edge,short|long|edge,rule test
+level_2,4,5,short,short|long,pre boss
+level_2,4,5,long,short|long|edge,pre boss
+level_2,4,5,edge,short|edge,pre boss
+level_2,6,,short,short|long|edge,late full pressure
+level_2,6,,long,short|long|edge,late full pressure
+level_2,6,,edge,short|long|edge,late full pressure
+level_3,1,1,short,short,first readable route
+level_3,1,1,long,long,first readable route
+level_3,1,1,edge,edge,first readable route
+level_3,2,2,short,short|long,second wave opens mirror long response
+level_3,2,2,long,short|long,second branch
+level_3,2,2,edge,short|edge,second edge branch
+level_3,3,3,short,short|long,rule test
+level_3,3,3,long,short|long,rule test
+level_3,3,3,edge,short|long|edge,rule test
+level_3,4,5,short,short|long,pre boss
+level_3,4,5,long,short|long|edge,pre boss
+level_3,4,5,edge,short|edge,pre boss
+level_3,6,,short,short|long|edge,late full pressure
+level_3,6,,long,short|long|edge,late full pressure
+level_3,6,,edge,short|long|edge,late full pressure
+level_4,1,1,short,short,first readable route
+level_4,1,1,long,long,first readable route
+level_4,1,1,edge,edge,first readable route
+level_4,2,2,short,short,second readable route
+level_4,2,2,long,short|long,second branch
+level_4,2,2,edge,short|edge,second edge branch
+level_4,3,3,short,short|long,rule test
+level_4,3,3,long,short|long,rule test
+level_4,3,3,edge,short|long|edge,rule test
+level_4,4,5,short,short|long,pre boss
+level_4,4,5,long,short|long|edge,pre boss
+level_4,4,5,edge,short|edge,pre boss
+level_4,6,,short,short|long|edge,late full pressure
+level_4,6,,long,short|long|edge,late full pressure
+level_4,6,,edge,short|long|edge,late full pressure
+level_6,1,1,short,short|long,opening mixed trial lanes
+level_6,1,1,long,long,first readable route
+level_6,1,1,edge,edge,first readable route
+level_6,2,2,short,short,second readable route
+level_6,2,2,long,long|edge,second wave stealth and split lanes
+level_6,2,2,edge,short|edge,second edge branch
+level_6,3,3,short,short|long,rule test
+level_6,3,3,long,short|long,rule test
+level_6,3,3,edge,short|long|edge,rule test
+level_6,4,5,short,short|long,pre boss
+level_6,4,5,long,short|long|edge,pre boss
+level_6,4,5,edge,short|edge,pre boss
+level_6,6,,short,short|long|edge,late full pressure
+level_6,6,,long,short|long|edge,late full pressure
+level_6,6,,edge,short|long|edge,late full pressure
+level_5,1,2,short,short|edge,fracture open from start
+level_5,1,2,long,long|edge,fracture open from start
+level_5,1,2,edge,edge|short,fracture open from start
+level_5,3,,short,short|long|edge,three breach pressure
+level_5,3,,long,short|long|edge,three breach pressure
+level_5,3,,edge,short|long|edge,three breach pressure

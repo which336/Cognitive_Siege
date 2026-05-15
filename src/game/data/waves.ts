@@ -1,13 +1,18 @@
-import { WaveSpec } from '../../types';
+import { LevelSpec, WaveSpec } from '../../types';
 
-// Hand-tuned base wave book. The Evolution Applier mutates these in place
-// (path bias / formation / skills / kinds) based on LLM next_strategy.
+// 手工调好的基础波次表。EvolutionApplier 会根据 LLM 的 next_strategy
+// 改写路线倾向、阵型、技能和心魔种类。
 export const TOTAL_WAVES = 10;
+export const DEFAULT_LEVEL_ID = 'level_1';
 
-let configuredBaseWaves: WaveSpec[] | null = null;
+let configuredLevelSpecs: LevelSpec[] | null = null;
 
 export function setConfiguredBaseWaves(waves: WaveSpec[]): void {
-  configuredBaseWaves = cloneWaves(waves);
+  configuredLevelSpecs = [makeDefaultLevelSpec(cloneWaves(waves))];
+}
+
+export function setConfiguredLevelSpecs(levels: LevelSpec[]): void {
+  configuredLevelSpecs = cloneLevels(levels);
 }
 
 function cloneWaves(waves: WaveSpec[]): WaveSpec[] {
@@ -20,12 +25,44 @@ function cloneWaves(waves: WaveSpec[]): WaveSpec[] {
   }));
 }
 
-export function buildBaseWaves(): WaveSpec[] {
-  if (configuredBaseWaves) return cloneWaves(configuredBaseWaves);
+function cloneLevels(levels: LevelSpec[]): LevelSpec[] {
+  return levels.map((level) => ({
+    ...level,
+    waves: cloneWaves(level.waves),
+  }));
+}
+
+function makeDefaultLevelSpec(waves: WaveSpec[]): LevelSpec {
+  return {
+    id: DEFAULT_LEVEL_ID,
+    name: '失眠首夜',
+    theme: '基础教学',
+    rule: 'tutorial',
+    globalHpMul: 1,
+    globalSpeedMul: 1,
+    mindGiftMul: 1,
+    waves,
+  };
+}
+
+export function getLevelSpecs(): LevelSpec[] {
+  return cloneLevels(configuredLevelSpecs ?? [makeDefaultLevelSpec(buildDefaultWaves())]);
+}
+
+export function getLevelSpec(levelId = DEFAULT_LEVEL_ID): LevelSpec {
+  const levels = getLevelSpecs();
+  return levels.find((level) => level.id === levelId) ?? levels[0];
+}
+
+export function buildBaseWaves(levelId = DEFAULT_LEVEL_ID): WaveSpec[] {
+  return getLevelSpec(levelId).waves;
+}
+
+function buildDefaultWaves(): WaveSpec[] {
 
   const w: WaveSpec[] = [];
 
-  // Wave 1: tutorial - readable single-route anxiety.
+  // 第 1 波：教学波，单路线焦虑，便于玩家读懂基础节奏。
   w.push({
     index: 1,
     isBoss: false,
@@ -41,8 +78,7 @@ export function buildBaseWaves(): WaveSpec[] {
     })),
   });
 
-  // Wave 2: anxiety + first depression. Keep the second lesson forgiving so
-  // players can recover from a weak first placement instead of spiraling.
+  // 第 2 波：焦虑 + 首次抑郁。保持容错，避免玩家第一波放错后直接崩盘。
   w.push({
     index: 2,
     isBoss: false,
@@ -62,7 +98,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 3: introduce obsession
+  // 第 3 波：引入强迫反刍。
   w.push({
     index: 3,
     isBoss: false,
@@ -88,7 +124,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 4: introduce guilt (cloak)
+  // 第 4 波：引入自责伪装。
   w.push({
     index: 4,
     isBoss: false,
@@ -115,7 +151,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 5: BOSS — Anxiety Core (negotiation) + filler
+  // 第 5 波：BOSS 焦虑之核（带谈判）+ 普通掩护单位。
   w.push({
     index: 5,
     isBoss: true,
@@ -130,12 +166,12 @@ export function buildBaseWaves(): WaveSpec[] {
         pathBias: 'short' as const,
         skills: ['rush'] as ('stealth' | 'swarm' | 'rush' | 'split' | 'taunt' | 'shield')[],
       })),
-      // Boss enemy uses kind anxiety with massive hp; flagged via skills.
+      // Boss 复用 anxiety 类型，但用超高 hpMul 和技能标记区分。
       { kind: 'anxiety', delayMs: 4000, hpMul: 14, speedMul: 0.7, pathBias: 'short', skills: ['shield'] },
     ],
   });
 
-  // Wave 6: aftershock - introduce ptsd after the first boss.
+  // 第 6 波：Boss 后余震，引入创伤闪回。
   w.push({
     index: 6,
     isBoss: false,
@@ -169,7 +205,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 7: ptsd becomes part of normal pressure.
+  // 第 7 波：创伤进入常规压力组成。
   w.push({
     index: 7,
     isBoss: false,
@@ -195,7 +231,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 8: mixed pressure
+  // 第 8 波：多类型混合压力。
   w.push({
     index: 8,
     isBoss: false,
@@ -231,7 +267,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 9: pre-final swarm
+  // 第 9 波：终战前的集群压力。
   w.push({
     index: 9,
     isBoss: false,
@@ -257,7 +293,7 @@ export function buildBaseWaves(): WaveSpec[] {
     ],
   });
 
-  // Wave 10: BOSS — Obsession "执念"
+  // 第 10 波：BOSS 强迫“执念”。
   w.push({
     index: 10,
     isBoss: true,
@@ -280,7 +316,7 @@ export function buildBaseWaves(): WaveSpec[] {
         pathBias: 'short' as const,
         skills: ['stealth'] as ('stealth' | 'swarm' | 'rush' | 'split' | 'taunt' | 'shield')[],
       })),
-      // Final boss
+      // 终局 Boss。
       { kind: 'obsession', delayMs: 5000, hpMul: 22, speedMul: 0.6, pathBias: 'short', skills: ['shield'] },
     ],
   });

@@ -3,7 +3,7 @@ import { el, mountOverlay, typewriter } from './dom';
 
 export function showVignette(v: VignetteContext, onContinue: () => void): { close: () => void } {
   const panel = el('div', { cls: 'cs-panel' });
-  panel.appendChild(el('div', { cls: 'cs-panel-title', text: `Night ${v.night}` }));
+  panel.appendChild(el('div', { cls: 'cs-panel-title', text: `第 ${v.wave} 波` }));
   panel.appendChild(el('div', { cls: 'cs-panel-sub', text: `${v.patientName} · ${v.emotion}` }));
 
   const vignetteEl = el('div', { cls: 'cs-vignette' });

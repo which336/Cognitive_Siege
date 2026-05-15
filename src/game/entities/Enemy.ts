@@ -13,9 +13,8 @@ export interface EnemyOpts {
   bossDamageMul?: number;
   bossSpeedMul?: number;
   bossHpMul?: number;
-  // Per-wave global escalation (applied on top of everything else).
-  // Driven by BattleScene from currentWaveIdx so every successive wave
-  // genuinely feels harder, not just visually.
+  // 每波全局成长倍率，叠加在敌人基础数值和 Boss 谈判结果之上。
+  // 由 BattleScene 根据 currentWaveIdx 传入，保证后续波次真实变强。
   waveHpMul?: number;
   waveSpeedMul?: number;
   waveDamageMul?: number;
@@ -27,11 +26,10 @@ export type DeathCause = 'memory' | 'belief' | 'resonance' | 'acceptance' | 'ins
 const SCALE_BOSS = 2.6;
 
 /**
- * Movement model: each enemy carries a precomputed pixel-space polyline
- * and a scalar `progressDist` (0..pathLen). Position is interpolated each
- * frame from progressDist along the cumulative-distance table. This makes
- * backtracking, slow effects, and forward jumps (PTSD) all single-variable
- * operations and eliminates corner-cutting bugs.
+ * 敌人移动模型：
+ * 每个敌人持有一条预计算好的像素折线，以及一个 progressDist 标量。
+ * 每帧只沿累计距离表插值位置，所以倒退、减速、PTSD 前跳都能用同一个变量表达，
+ * 同时避免拐角处“切角”穿格。
  */
 export class Enemy {
   scene: Phaser.Scene;
@@ -42,17 +40,17 @@ export class Enemy {
   routeVariant: RouteVariant;
   pathCells: GridPos[];
 
-  // Pixel polyline + cumulative distances
+  // 像素空间折线与每个折点的累计距离。
   pathPx: PixelPos[];
   cumDist: number[];
   pathLen: number;
 
   progressDist = 0;
-  segIdx = 0; // cached for fast lookups
+  segIdx = 0; // 缓存当前路径段，减少每帧查找成本。
 
   hp: number;
   hpMax: number;
-  speed: number;       // pixels per gameTime second
+  speed: number;       // 每 gameTime 秒移动的像素数。
   damage: number;
   bounty: number;
   pathProgress = 0;
@@ -60,22 +58,26 @@ export class Enemy {
   bossAuraDamageMul = 1;
   bossAuraDamageTakenMul = 1;
   bossHpShieldApplied = false;
+  mapElementTaunt = false;
+  private mapHpShieldIds = new Set<string>();
 
-  // Behavior state
+  // 行为状态：隐身、减速、禁锢和强迫回退都挂在这里。
   cloaked = false;
   revealed = false;
   slowFactor = 1;
-  slowEndAt = 0;       // gameTime ms
+  slowEndAt = 0;       // gameTime 毫秒。
 
-  // Obsession-radiated speed buff: triggered when an Obsession on the same
-  // path starts a loop-back. Multiplied into final speed alongside slowFactor.
+  // 强迫回退会向周围心魔辐射移速加成；最终速度会同时乘 slowFactor 和 tempSpeedMul。
   tempSpeedMul = 1;
-  tempSpeedEndAt = 0;  // gameTime ms
-  rootedUntil = 0;      // gameTime ms
-  rootHintNextAt = 0;   // gameTime ms
+  tempSpeedEndAt = 0;  // gameTime 毫秒。
+  private speedHintNextAt = 0;
+  rootedUntil = 0;      // gameTime 毫秒。
+  rootHintNextAt = 0;   // gameTime 毫秒。
+  private currentGameTime = 0;
+  private flickerSuppressedUntil = 0;
 
-  // Obsession loop
-  loopNextAt = 2500;   // first attempt 2.5s in
+  // 强迫反刍：到点后短距离后退，再继续前进。
+  loopNextAt = 2500;   // 首次尝试在出生 2.5 秒后。
   loopBackUntilDist = -1;
 
   alive = true;
@@ -85,7 +87,7 @@ export class Enemy {
   diedAtX = 0;
   diedAtY = 0;
 
-  // Visuals
+  // 视觉对象。Enemy 自己管理生死动画和血条，Scene 只负责数组生命周期。
   body: Phaser.GameObjects.Container;
   disc: Phaser.GameObjects.Arc;
   glyph: Phaser.GameObjects.Text;
@@ -105,7 +107,7 @@ export class Enemy {
     this.persona = pickPersona(opts.spec.kind, opts.spec.personaIdx);
     this.pathCells = opts.path.map(cell => ({ col: cell.col, row: cell.row }));
 
-    // Build pixel polyline + cumulative distances
+    // 把格子路线转换为像素折线，并生成累计距离表，后续移动只改 progressDist。
     this.pathPx = opts.path.map(g => opts.grid.cellCenter(g.col, g.row));
     this.cumDist = new Array(this.pathPx.length).fill(0);
     let total = 0;
@@ -117,7 +119,7 @@ export class Enemy {
     }
     this.pathLen = total;
 
-    // Stats
+    // 基础数值 = 敌人定义 × 刷怪倍率 × Boss/波次倍率。
     const bossHpMul  = opts.bossHpMul  ?? 1;
     const bossSpdMul = opts.bossSpeedMul ?? 1;
     const bossDmgMul = opts.bossDamageMul ?? 1;
@@ -148,7 +150,7 @@ export class Enemy {
     }
     if (this.spec.skills.includes('stealth')) this.cloaked = true;
 
-    // Build sprite at start of path
+    // 初始位置放在路径起点；若素材缺失则回退到圆形+字符。
     const start = this.pathPx[0];
     this.body = scene.add.container(start.x, start.y);
     const r = this.def.radius * (this.isBoss ? SCALE_BOSS : 1);
@@ -220,9 +222,10 @@ export class Enemy {
     }
   }
 
-  /** Multiplicative speed buff (e.g. obsession's "compulsive repeat" aura).
-   *  Stronger buffs override weaker ones; matching/weaker buffs only refresh
-   *  the duration so a swarm of obsessions can sustain it. */
+  /**
+   * 乘法移速增益，例如强迫“反刍”辐射。
+   * 更强增益覆盖弱增益；相同/更弱增益只刷新持续时间，避免叠到不可控。
+   */
   applySpeedBuff(mul: number, durationMs: number, gameTimeNow: number): void {
     if (mul > this.tempSpeedMul) {
       this.tempSpeedMul = mul;
@@ -230,7 +233,10 @@ export class Enemy {
     } else {
       this.tempSpeedEndAt = Math.max(this.tempSpeedEndAt, gameTimeNow + durationMs);
     }
-    this.flashSpeedBuffHint();
+    if (gameTimeNow >= this.speedHintNextAt) {
+      this.speedHintNextAt = gameTimeNow + 700;
+      this.flashSpeedBuffHint();
+    }
   }
 
   applyRoot(durationMs: number, gameTimeNow: number): void {
@@ -242,16 +248,32 @@ export class Enemy {
     }
   }
 
+  suppressFlicker(durationMs: number, gameTimeNow: number): void {
+    if (this.def.behavior !== 'flicker') return;
+    this.flickerSuppressedUntil = Math.max(this.flickerSuppressedUntil, gameTimeNow + durationMs);
+  }
+
   private flashSpeedBuffHint(): void {
-    const t = this.scene.add.text(this.body.x, this.body.y - 22, '↑↑', {
-      fontSize: '13px', color: '#fbbf24', fontFamily: 'inherit',
-    }).setOrigin(0.5, 1).setDepth(40).setAlpha(0);
+    const g = this.scene.add.graphics().setDepth(40).setAlpha(0);
+    g.lineStyle(2, 0x67e8f9, 0.78);
+    g.lineBetween(this.body.x - 13, this.body.y + 7, this.body.x - 3, this.body.y + 1);
+    g.lineBetween(this.body.x - 7, this.body.y + 12, this.body.x + 5, this.body.y + 5);
+    g.lineStyle(1, 0xfde68a, 0.5);
+    g.lineBetween(this.body.x - 15, this.body.y + 11, this.body.x - 7, this.body.y + 7);
     this.scene.tweens.add({
-      targets: t, alpha: 1, y: t.y - 4, duration: 160, ease: 'Sine.easeOut',
+      targets: g,
+      alpha: 0.82,
+      y: -4,
+      duration: 130,
+      ease: 'Sine.easeOut',
     });
     this.scene.tweens.add({
-      targets: t, alpha: 0, y: t.y - 14, delay: 360, duration: 320,
-      onComplete: () => t.destroy(),
+      targets: g,
+      alpha: 0,
+      y: -13,
+      delay: 220,
+      duration: 260,
+      onComplete: () => g.destroy(),
     });
   }
 
@@ -274,6 +296,15 @@ export class Enemy {
     this.updateHpBar();
   }
 
+  applyMapHpShield(sourceId: string, ratio: number): void {
+    if (!sourceId || this.mapHpShieldIds.has(sourceId) || ratio <= 0) return;
+    this.mapHpShieldIds.add(sourceId);
+    const added = Math.max(1, Math.round(this.hpMax * ratio));
+    this.hpMax += added;
+    this.hp += added;
+    this.updateHpBar();
+  }
+
   effectiveDamage(): number {
     return Math.max(1, Math.round(this.damage * this.bossAuraDamageMul));
   }
@@ -286,8 +317,8 @@ export class Enemy {
     this.flashHurt();
     this.updateHpBar();
 
-    // PTSD flicker: skip 1 tile worth forward on damage
-    if (this.def.behavior === 'flicker' && this.alive) {
+    // PTSD 闪回：受击后向前闪烁一小段，制造难以稳定集火的压力。
+    if (this.def.behavior === 'flicker' && this.alive && this.currentGameTime >= this.flickerSuppressedUntil) {
       this.progressDist = Math.min(this.pathLen, this.progressDist + 36);
     }
 
@@ -402,10 +433,11 @@ export class Enemy {
   }
 
   /**
-   * Drive enemy forward by `gameDelta` ms in game-time. The caller passes
-   * the same gameTime/gameDelta to all entities so the speed toggle is honored.
+   * 按 gameTime 驱动敌人移动。调用方给所有实体传同一组 gameTime/gameDelta，
+   * 这样倍速切换会统一影响出怪、冷却、减速和动画判定。
    */
   update(gameTime: number, gameDelta: number): void {
+    this.currentGameTime = gameTime;
     if (!this.alive) return;
     if (this.attackingCore) return;
     if (this.pathPx.length < 2) { this.arriveAtCore(); return; }
@@ -417,9 +449,7 @@ export class Enemy {
       return;
     }
 
-    // Obsession loop scheduling: every 3.2s a regular obsession reverses for
-    // ~ 1 tile worth of distance. Bosses NEVER loop — they're relentless and
-    // only ever push toward the core; reversal is for the chittering chorus.
+    // 强迫心魔每 3.2 秒会后退约一格；Boss 不参与回退，保证首领持续压向核心。
     if (this.def.behavior === 'loop'
         && !this.isBoss
         && this.loopBackUntilDist < 0
@@ -428,8 +458,7 @@ export class Enemy {
       this.loopBackUntilDist = Math.max(0, this.progressDist - 56);
       this.loopNextAt = gameTime + 3200;
       this.flashLoopHint();
-      // Notify scene so it can radiate the +20% movement aura to allies on
-      // the same path. Decoupled via Phaser's scene event bus.
+      // 通知场景给附近友军辐射 +20% 移速；通过 Phaser 事件总线解耦。
       this.scene.events.emit('obsession_loop', this);
     }
 
@@ -456,10 +485,10 @@ export class Enemy {
     this.pathProgress = this.getProgress();
   }
 
-  /** Look up pixel position at current progressDist along the cumulative distance table. */
+  /** 根据 progressDist 在累计距离表中查找当前像素位置。 */
   private applyPosition(): void {
     const d = this.progressDist;
-    // Advance segIdx forward as needed
+    // segIdx 是缓存段索引，敌人前进/后退时只做局部移动，避免每帧从头扫描。
     while (this.segIdx < this.cumDist.length - 1 && this.cumDist[this.segIdx + 1] < d) {
       this.segIdx++;
     }
@@ -525,9 +554,10 @@ export class Enemy {
     });
   }
 
-  /** Visual cue when a regular obsession enemy starts a loop-back: a curved
-   *  rewind glyph + a short emoji bounce. Helps players read "this is intentional",
-   *  not a path-finding bug. */
+  /**
+   * 普通强迫心魔回退时的视觉提示：回绕字符 + 短促弹动。
+   * 目的是让玩家明确这是机制，不是寻路错误。
+   */
   private flashLoopHint(): void {
     const t = this.scene.add.text(this.body.x, this.body.y - 26, '↺ 反刍', {
       fontSize: '11px',

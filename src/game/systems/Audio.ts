@@ -1,7 +1,7 @@
 /**
- * Hybrid audio engine.
- * Priority: Phaser cached audio (real .wav/.mp3/.ogg files) > Web Audio API synthesis fallback.
- * Audio files live in public/assets/audio/ — see preload() for the full list.
+ * 混合音频引擎。
+ * 优先播放 Phaser 缓存中的真实音频文件；缺失或失败时回退到 Web Audio API 合成音。
+ * 音频文件位于 public/assets/audio/，完整列表见 preload()。
  */
 
 type Voice = 'tower_place' | 'tower_fire' | 'enemy_die' | 'enemy_hit' | 'sanity_hit' | 'wave_start' | 'review_open' | 'choice_pick' | 'victory' | 'gameover';
@@ -40,7 +40,7 @@ class AudioManager {
 
   /** 等待音频文件加载完成（由 BootScene.create 调用）。 */
   waitForLoad(scene: Phaser.Scene): void {
-    scene.load.once('complete', () => { /* ready */ });
+    scene.load.once('complete', () => { /* 已就绪 */ });
   }
 
   private ensure(): AudioContext {
@@ -68,10 +68,10 @@ class AudioManager {
     const game = (window as any).__cognitiveSiegeGame;
     if (game) {
       try {
-        // sound.play(key) 会从 Sound Manager 缓存查找已 decode 的音频并播放
+        // sound.play(key) 会从 Sound Manager 缓存查找已解码音频并播放。
         const success: boolean = game.sound.play(voice, { volume: this.volume });
         if (success !== false) return;
-      } catch { /* fall through to synthesis */ }
+      } catch { /* 回退到合成音 */ }
     }
 
     // 降级：Web Audio API 合成
@@ -94,7 +94,7 @@ class AudioManager {
         case 'victory':      this.tone(t, [440, 554, 659, 880], 1.4, 0.25, 'triangle'); break;
         case 'gameover':     this.tone(t, [220, 174, 139, 110], 1.6, 0.3, 'sawtooth'); break;
       }
-    } catch { /* ignore */ }
+    } catch { /* 忽略音频回退失败 */ }
   }
 
   startAmbient(): void {
@@ -117,7 +117,7 @@ class AudioManager {
       this.musicNodes.push(make(110, 0));
       this.musicNodes.push(make(165, -8));
       this.musicNodes.push(make(220, 12));
-    } catch { /* ignore */ }
+    } catch { /* 忽略环境音启动失败 */ }
   }
 
   stopAmbient(): void {
@@ -128,7 +128,7 @@ class AudioManager {
         m.gain.gain.cancelScheduledValues(ctx.currentTime);
         m.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
         m.osc.stop(ctx.currentTime + 1.4);
-      } catch { /* ignore */ }
+      } catch { /* 忽略停止失败 */ }
     }
     this.musicNodes = [];
   }

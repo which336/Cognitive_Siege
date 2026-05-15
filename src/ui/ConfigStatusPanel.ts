@@ -1,10 +1,33 @@
 import { ConfigLoadReport } from '../game/data/configLoader';
 import { el, mountOverlay } from './dom';
 
+let activeConfigStatusClose: (() => void) | null = null;
+
 export function showConfigStatus(report: ConfigLoadReport, onClose: () => void): { close: () => void } {
+  activeConfigStatusClose?.();
+  activeConfigStatusClose = null;
+
   const isOk = report.status === 'ok';
   const panel = el('div', { cls: 'cs-panel wide' });
+  const closeEvents = {
+    pointerdown: (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    },
+    click: (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    },
+  };
 
+  panel.appendChild(el('button', {
+    cls: 'cs-panel-close',
+    text: '×',
+    attrs: { type: 'button', 'aria-label': '关闭配置校验报告', 'data-config-close': 'true' },
+    on: closeEvents,
+  }));
   panel.appendChild(el('div', { cls: 'cs-panel-title', text: '配置校验报告' }));
   panel.appendChild(el('div', {
     cls: 'cs-panel-sub',
@@ -48,15 +71,17 @@ export function showConfigStatus(report: ConfigLoadReport, onClose: () => void):
 
   panel.appendChild(el('div', { cls: 'cs-disclaimer', text: '校验范围：空表、必填行、枚举、数字范围、路线列表、技能列表、1-10 波完整性。校验失败时会保留内置默认值，保证演示可继续。' }));
 
-  const actions = el('div', { cls: 'cs-actions' });
+  const actions = el('div', { cls: 'cs-actions sticky' });
   actions.appendChild(el('button', {
     cls: 'cs-btn primary',
     text: '关闭',
-    on: { click: () => close() },
+    attrs: { type: 'button', 'data-config-close': 'true' },
+    on: closeEvents,
   }));
   panel.appendChild(actions);
 
   const handle = mountOverlay(panel);
+  let closed = false;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Escape') return;
     close();
@@ -64,10 +89,14 @@ export function showConfigStatus(report: ConfigLoadReport, onClose: () => void):
   window.addEventListener('keydown', onKeyDown);
 
   function close(): void {
+    if (closed) return;
+    closed = true;
     window.removeEventListener('keydown', onKeyDown);
+    if (activeConfigStatusClose === close) activeConfigStatusClose = null;
     handle.close();
     onClose();
   }
 
+  activeConfigStatusClose = close;
   return { close };
 }

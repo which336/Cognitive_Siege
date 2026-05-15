@@ -10,6 +10,7 @@ const tau = Math.PI * 2;
 
 let seed = 20260426;
 function rand() {
+  // 固定种子的线性同余随机数，保证每次生成的音频完全一致。
   seed = (seed * 1664525 + 1013904223) >>> 0;
   return seed / 0xffffffff;
 }
@@ -22,6 +23,7 @@ function wave(type, phase) {
 }
 
 function env(t, dur, attack = 0.006, release = 0.18) {
+  // 短起音 + 缓释音量包络，让提示音更像梦境风格的钟声而不是裸振荡器。
   if (t < 0 || t > dur) return 0;
   const a = Math.max(0.001, Math.min(attack, dur * 0.45));
   const r = Math.max(0.006, Math.min(release, dur * 0.75));
@@ -79,6 +81,7 @@ function addNoise(buf, startSec, dur, gain, pan = 0, lowpass = 0.18) {
 }
 
 function addDelay(buf, delay = 0.085, feedback = 0.24) {
+  // 给所有音效加一个很短的双声道回声，统一声音空间感。
   const d = Math.floor(delay * sampleRate);
   for (let ch = 0; ch < 2; ch++) {
     const len = buf[ch].length;
@@ -94,6 +97,7 @@ function addDelay(buf, delay = 0.085, feedback = 0.24) {
 }
 
 function finish(buf) {
+  // 裁掉尾部静音并做轻柔限幅，防止生成的 wav 爆音。
   let end = Math.max(1, buf[0].length - 1);
   for (let i = buf[0].length - 1; i > Math.floor(sampleRate * 0.1); i--) {
     if (Math.abs(buf[0][i]) > 0.0009 || Math.abs(buf[1][i]) > 0.0009) {

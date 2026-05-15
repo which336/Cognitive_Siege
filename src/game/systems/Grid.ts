@@ -1,5 +1,7 @@
 import {
   GridPos,
+  MapElementKind,
+  MapElementSpec,
   MapProjection,
   MapProjectionSummary,
   PathBias,
@@ -17,6 +19,7 @@ export interface GridConfig {
 
 export type CellKind = 'path' | 'build' | 'spawn' | 'core' | 'block';
 
+// Grid 只负责格子占用和坐标换算；路线开放规则在下方投影函数中处理。
 export class Grid {
   readonly cfg: GridConfig;
   readonly cells: CellKind[][];
@@ -76,6 +79,7 @@ export class Grid {
   }
 
   preserveTower(col: number, row: number, towerId: number, placement: 'build' | 'path' = 'build'): boolean {
+    // 地图重投影后恢复已有塔位：普通塔不能落在路线/核心/出生点，边界塔必须仍在线路上。
     if (!this.inBounds(col, row)) return false;
     if (placement === 'path') {
       if (this.cells[row][col] !== 'path') return false;
@@ -105,6 +109,7 @@ export interface ProjectedLevel {
   altPathCells: GridPos[];
   edgePathCells: GridPos[];
   spawn: GridPos;
+  spawnPositions: Record<RouteVariant, GridPos>;
   core: GridPos;
   projection: MapProjection;
 }
@@ -114,14 +119,18 @@ export interface MapProjectionOptions {
   activeRoute?: RouteVariant;
   waveIndex?: number;
   aggression?: number;
+  forceOpenRoutes?: RouteVariant[];
   occupiedCells?: GridPos[];
   extraBuildCells?: GridPos[];
+  levelId?: string;
+  disabledMapElementIds?: string[];
 }
 
 const ROUTES: RouteVariant[] = ['short', 'long', 'edge'];
 
 interface RouteBlueprint {
   spawn: GridPos;
+  spawnPositions: Record<RouteVariant, GridPos>;
   core: GridPos;
   routes: Record<RouteVariant, GridPos[]>;
 }
@@ -133,16 +142,32 @@ export interface RouteOpenRule {
   openRoutes: RouteVariant[];
 }
 
-export interface MapConfigData {
+export interface LevelMapConfig {
   routeWaypoints: Record<RouteVariant, GridPos[]>;
   buildCells: Record<RouteVariant, GridPos[]>;
   routeOpenRules: RouteOpenRule[];
+  elements: MapElementSpec[];
+}
+
+export interface MapConfigData {
+  levels: Record<string, LevelMapConfig>;
+  defaultLevelId: string;
 }
 
 let configuredMapConfig: MapConfigData | null = null;
 
 export function setConfiguredMapConfig(config: MapConfigData): void {
+  // 外部 CSV 配置会被克隆进内存，避免运行时修改污染原始配置对象。
   configuredMapConfig = {
+    defaultLevelId: config.defaultLevelId,
+    levels: Object.fromEntries(
+      Object.entries(config.levels).map(([levelId, level]) => [levelId, cloneLevelMapConfig(level)]),
+    ),
+  };
+}
+
+function cloneLevelMapConfig(config: LevelMapConfig): LevelMapConfig {
+  return {
     routeWaypoints: {
       short: config.routeWaypoints.short.map((cell) => ({ ...cell })),
       long: config.routeWaypoints.long.map((cell) => ({ ...cell })),
@@ -157,10 +182,22 @@ export function setConfiguredMapConfig(config: MapConfigData): void {
       ...rule,
       openRoutes: [...rule.openRoutes],
     })),
+    elements: config.elements.map((element) => ({
+      ...element,
+      cell: { ...element.cell },
+    })),
   };
 }
 
+function configuredLevelMap(levelId?: string): LevelMapConfig | null {
+  if (!configuredMapConfig) return null;
+  return configuredMapConfig.levels[levelId ?? configuredMapConfig.defaultLevelId]
+    ?? configuredMapConfig.levels[configuredMapConfig.defaultLevelId]
+    ?? null;
+}
+
 function lineCells(a: GridPos, b: GridPos): GridPos[] {
+  // 路线配置只允许横竖折线；若误传斜线，保守地只保留起点，避免生成穿格路径。
   const out: GridPos[] = [];
   if (a.col === b.col) {
     const step = b.row > a.row ? 1 : -1;
@@ -175,6 +212,7 @@ function lineCells(a: GridPos, b: GridPos): GridPos[] {
 }
 
 function pathFromWaypoints(waypoints: GridPos[]): GridPos[] {
+  // 将少量折点展开成逐格路径，供敌人寻路和地图绘制共用。
   const out: GridPos[] = [waypoints[0]];
   for (let i = 1; i < waypoints.length; i++) {
     const seg = lineCells(waypoints[i - 1], waypoints[i]);
@@ -204,16 +242,23 @@ function uniqueCells(cells: GridPos[]): GridPos[] {
   return out;
 }
 
-function routeBlueprint(cfg: GridConfig): RouteBlueprint {
-  if (configuredMapConfig) {
+function routeBlueprint(cfg: GridConfig, levelId?: string): RouteBlueprint {
+  const mapConfig = configuredLevelMap(levelId);
+  if (mapConfig) {
+    // 优先使用 CSV 配置的路线蓝图；缺失配置时才回退到代码内置路线。
     const routes = {
-      short: pathFromWaypoints(configuredMapConfig.routeWaypoints.short),
-      long: pathFromWaypoints(configuredMapConfig.routeWaypoints.long),
-      edge: pathFromWaypoints(configuredMapConfig.routeWaypoints.edge),
+      short: pathFromWaypoints(mapConfig.routeWaypoints.short),
+      long: pathFromWaypoints(mapConfig.routeWaypoints.long),
+      edge: pathFromWaypoints(mapConfig.routeWaypoints.edge),
     };
     return {
-      spawn: configuredMapConfig.routeWaypoints.short[0],
-      core: configuredMapConfig.routeWaypoints.short[configuredMapConfig.routeWaypoints.short.length - 1],
+      spawn: mapConfig.routeWaypoints.short[0],
+      spawnPositions: {
+        short: mapConfig.routeWaypoints.short[0],
+        long: mapConfig.routeWaypoints.long[0],
+        edge: mapConfig.routeWaypoints.edge[0],
+      },
+      core: mapConfig.routeWaypoints.short[mapConfig.routeWaypoints.short.length - 1],
       routes,
     };
   }
@@ -263,6 +308,7 @@ function routeBlueprint(cfg: GridConfig): RouteBlueprint {
 
   return {
     spawn,
+    spawnPositions: { short: spawn, long: spawn, edge: spawn },
     core,
     routes: { short, long, edge },
   };
@@ -275,8 +321,7 @@ export function resolveRouteVariant(pathBias: PathBias = 'short', waveIndex = 1)
     case 'edge':
       return 'edge';
     case 'random':
-      // Map projection needs a stable primary route. Per-enemy randomization is
-      // handled in WaveSystem when each spawn picks its concrete branch.
+      // 地图投影需要稳定主路线；逐个敌人的随机分路交给 WaveSystem 处理。
       return ROUTES[Math.max(0, waveIndex - 1) % ROUTES.length];
     case 'center':
     case 'short':
@@ -297,9 +342,11 @@ export function routeVariantLabel(route: RouteVariant): string {
   }
 }
 
-export function openRoutesForPrimary(route: RouteVariant, waveIndex = 1): RouteVariant[] {
-  if (configuredMapConfig?.routeOpenRules.length) {
-    const rule = configuredMapConfig.routeOpenRules.find((item) => (
+export function openRoutesForPrimary(route: RouteVariant, waveIndex = 1, levelId?: string): RouteVariant[] {
+  const mapConfig = configuredLevelMap(levelId);
+  if (mapConfig?.routeOpenRules.length) {
+    // CSV 可以精确控制“主路线 -> 实际开放分支”的教学节奏。
+    const rule = mapConfig.routeOpenRules.find((item) => (
       item.primaryRoute === route &&
       waveIndex >= item.minWave &&
       (item.maxWave == null || waveIndex <= item.maxWave)
@@ -378,15 +425,47 @@ const FIXED_BUILD_CELLS: Record<RouteVariant, GridPos[]> = {
   ],
 };
 
-function fixedBuildCells(route: RouteVariant): GridPos[] {
-  if (configuredMapConfig) return uniqueCells(configuredMapConfig.buildCells[route]);
+function fixedBuildCells(route: RouteVariant, levelId?: string): GridPos[] {
+  // 可建造格跟随主路线切换，减少玩家能长期无脑覆盖全图的固定点。
+  const mapConfig = configuredLevelMap(levelId);
+  if (mapConfig) return uniqueCells(mapConfig.buildCells[route]);
   return uniqueCells(FIXED_BUILD_CELLS[route]);
 }
 
+function activeMapElementsForWave(levelId: string | undefined, waveIndex: number): MapElementSpec[] {
+  const mapConfig = configuredLevelMap(levelId);
+  if (!mapConfig) return [];
+  return mapConfig.elements
+    .filter((element) => waveIndex >= element.waveStart && (element.waveEnd == null || waveIndex <= element.waveEnd))
+    .map((element) => ({
+      ...element,
+      cell: { ...element.cell },
+    }));
+}
+
+function uniqueElementKinds(elements: MapElementSpec[]): MapElementKind[] {
+  return Array.from(new Set(elements.map((element) => element.kind)));
+}
+
+function cellWithinElementRadius(cell: GridPos, element: MapElementSpec): boolean {
+  const radius = Math.max(0, element.radiusCells || 0);
+  const dx = cell.col - element.cell.col;
+  const dy = cell.row - element.cell.row;
+  return dx * dx + dy * dy <= radius * radius;
+}
+
 export function createMapProjection(cfg: GridConfig, opts: MapProjectionOptions = {}): MapProjection {
-  const blueprint = routeBlueprint(cfg);
-  const activeRoute = opts.activeRoute ?? resolveRouteVariant(opts.pathBias, opts.waveIndex ?? 1);
-  const activeRoutes = openRoutesForPrimary(activeRoute, opts.waveIndex ?? 1);
+  // 这里产出“本波实际地图视图”：开放哪些路、哪些塔位有效、哪些格子阻塞。
+  const levelId = opts.levelId;
+  const waveIndex = opts.waveIndex ?? 1;
+  const disabledMapElementIds = new Set(opts.disabledMapElementIds ?? []);
+  const mapElements = activeMapElementsForWave(levelId, waveIndex)
+    .filter((element) => !disabledMapElementIds.has(element.id));
+  const blueprint = routeBlueprint(cfg, levelId);
+  const activeRoute = opts.activeRoute ?? resolveRouteVariant(opts.pathBias, waveIndex);
+  const activeRoutes = opts.forceOpenRoutes?.length
+    ? uniqueRoutes(opts.forceOpenRoutes)
+    : openRoutesForPrimary(activeRoute, waveIndex, levelId);
   const inactiveRoutes = ROUTES.filter((route) => !activeRoutes.includes(route));
   const activePath = uniqueCells(activeRoutes.flatMap((route) => blueprint.routes[route]));
   const activeKeys = new Set(activePath.map(keyOf));
@@ -396,13 +475,16 @@ export function createMapProjection(cfg: GridConfig, opts: MapProjectionOptions 
   }
 
   const buildKeys = new Set<string>();
-  for (const cell of fixedBuildCells(activeRoute)) buildKeys.add(keyOf(cell));
+  for (const cell of fixedBuildCells(activeRoute, levelId)) buildKeys.add(keyOf(cell));
   for (const cell of opts.extraBuildCells ?? []) buildKeys.add(keyOf(cell));
 
+  const dryWells = mapElements.filter((element) => element.kind === 'dry_well');
   for (const key of Array.from(buildKeys)) {
     const cell = cellFromKey(key);
     const border = cell.col <= 0 || cell.row <= 0 || cell.col >= cfg.cols - 1 || cell.row >= cfg.rows - 1;
-    if (border || allRouteKeys.has(key)) {
+    // 防止塔位覆盖边界或任意路线格，保证敌人路线不会被普通塔堵死。
+    // 存活枯井会压制半径内塔位；打掉后由场景把释放格加入 extraBuildCells。
+    if (border || allRouteKeys.has(key) || dryWells.some((well) => cellWithinElementRadius(cell, well))) {
       buildKeys.delete(key);
     }
   }
@@ -436,6 +518,8 @@ export function createMapProjection(cfg: GridConfig, opts: MapProjectionOptions 
     corruptionLevel,
     towerPocketCount: buildCells.length,
     attackIntent: routeAttackIntent(activeRoute),
+    mapElementCount: mapElements.length,
+    mapElementKinds: uniqueElementKinds(mapElements),
   };
 
   return {
@@ -446,13 +530,15 @@ export function createMapProjection(cfg: GridConfig, opts: MapProjectionOptions 
     inactivePathCells,
     buildCells,
     blockedCells,
+    mapElements,
     corruptionLevel,
     summary,
   };
 }
 
 export function buildProjectedLevel(cfg: GridConfig, opts: MapProjectionOptions = {}): ProjectedLevel {
-  const blueprint = routeBlueprint(cfg);
+  // Phaser 场景最终消费的是实体 Grid；Projection 则保留给 UI 和复盘证明面板。
+  const blueprint = routeBlueprint(cfg, opts.levelId);
   const projection = createMapProjection(cfg, opts);
   const grid = new Grid(cfg);
 
@@ -461,7 +547,9 @@ export function buildProjectedLevel(cfg: GridConfig, opts: MapProjectionOptions 
     for (const cell of blueprint.routes[route]) grid.set(cell.col, cell.row, 'path');
   }
 
-  grid.set(blueprint.spawn.col, blueprint.spawn.row, 'spawn');
+  for (const spawn of uniqueCells(Object.values(blueprint.spawnPositions))) {
+    grid.set(spawn.col, spawn.row, 'spawn');
+  }
   grid.set(blueprint.core.col, blueprint.core.row, 'core');
 
   return {
@@ -470,6 +558,11 @@ export function buildProjectedLevel(cfg: GridConfig, opts: MapProjectionOptions 
     altPathCells: blueprint.routes.long,
     edgePathCells: blueprint.routes.edge,
     spawn: blueprint.spawn,
+    spawnPositions: {
+      short: { ...blueprint.spawnPositions.short },
+      long: { ...blueprint.spawnPositions.long },
+      edge: { ...blueprint.spawnPositions.edge },
+    },
     core: blueprint.core,
     projection,
   };

@@ -1,6 +1,11 @@
 import {
   EnemyKind,
   Formation,
+  GridPos,
+  LevelRuleKind,
+  LevelSpec,
+  MapElementKind,
+  MapElementSpec,
   PathBias,
   RouteVariant,
   SkillFlag,
@@ -9,7 +14,7 @@ import {
 } from '../../types';
 import { ENEMY_DEFS, EnemyDef } from './enemies';
 import { TOWER_DEFS } from './towers';
-import { setConfiguredBaseWaves } from './waves';
+import { setConfiguredLevelSpecs } from './waves';
 import { MapConfigData, setConfiguredMapConfig } from '../systems/Grid';
 import { RouteStrategyConfig, setRouteStrategyConfig } from '../systems/WaveSystem';
 
@@ -17,6 +22,7 @@ type CsvRow = Record<string, string>;
 export interface TutorialTip {
   title: string;
   body: string;
+  routeNote?: string;
 }
 
 export interface ConfigLoadReport {
@@ -28,6 +34,7 @@ export interface ConfigLoadReport {
 }
 
 interface ExternalConfigTables {
+  levelRows: CsvRow[];
   towerRows: CsvRow[];
   enemyRows: CsvRow[];
   waveRows: CsvRow[];
@@ -37,6 +44,7 @@ interface ExternalConfigTables {
   routeRows: CsvRow[];
   buildCellRows: CsvRow[];
   routeRuleRows: CsvRow[];
+  mapElementRows: CsvRow[];
   enemyRoutePreferenceRows: CsvRow[];
   routeStrategyWeightRows: CsvRow[];
   mindCacheRows: CsvRow[];
@@ -67,7 +75,8 @@ export interface MindCacheConfig {
 }
 
 export type DifficultyKind = 'easy' | 'normal' | 'hard';
-export type BossSkillKind = 'anxiety_core' | 'depression_core';
+export const BOSS_SKILL_KINDS = ['anxiety_core', 'depression_core', 'obsession_core', 'guilt_core', 'ptsd_core'] as const;
+export type BossSkillKind = typeof BOSS_SKILL_KINDS[number];
 
 export interface DifficultyConfig {
   sanityStart: number;
@@ -118,6 +127,8 @@ const formations: Formation[] = ['scattered', 'clustered', 'wedge', 'rear_first'
 const pathBiases: PathBias[] = ['short', 'long', 'edge', 'center', 'random'];
 const routeVariants: RouteVariant[] = ['short', 'long', 'edge'];
 const skillFlags: SkillFlag[] = ['stealth', 'swarm', 'rush', 'split', 'taunt', 'shield'];
+const levelRules: LevelRuleKind[] = ['tutorial', 'breath_phase', 'echo_group', 'scarcity', 'fracture_edge', 'trial_elite'];
+const mapElementKinds: MapElementKind[] = ['breath_vent', 'mirror_gate', 'dry_well', 'fracture_node', 'trial_obelisk'];
 
 let loaded = false;
 let configLoadReport: ConfigLoadReport = {
@@ -127,22 +138,24 @@ let configLoadReport: ConfigLoadReport = {
   loadedTables: [],
   checkedAt: null,
 };
-let tutorialTips: Record<number, TutorialTip> = {
-  1: {
-    title: '教学 1/4：焦虑疾走者',
-    body: '先造2座美好回忆塔，别急着单塔升级。\n右侧金色图标是念力残堆。\n没有心魔时，塔会打破它返还念力。',
-  },
-  2: {
-    title: '教学 2/4：抑郁重雾',
-    body: '抑郁血厚、会拖慢附近塔，补信念塔处理高血量目标。\n本波开始出现第二条亮路，优先覆盖交汇处。',
-  },
-  3: {
-    title: '教学 3/4：强迫循环者',
-    body: '强迫会回头反刍并带快同伴，别只守出生点。\n点击已建塔可查看数值、升级或拆除。',
-  },
-  4: {
-    title: '教学 4/4：自责伪装者',
-    body: '自责带伪装，普通塔很难稳定锁定。\n共鸣塔伤害低，但能破隐和减速，放在路线交汇或核心前。',
+let tutorialTips: Record<string, Record<number, TutorialTip>> = {
+  level_1: {
+    1: {
+      title: '教学 1/4：焦虑疾走者',
+      body: '先造2座美好回忆塔，别急着单塔升级。\n右侧金色图标是念力残堆。\n没有心魔时，塔会打破它返还念力。',
+    },
+    2: {
+      title: '教学 2/4：抑郁重雾',
+      body: '抑郁血厚、会拖慢附近塔，补信念塔处理高血量目标。\n本波开始出现第二条亮路，优先覆盖交汇处。',
+    },
+    3: {
+      title: '教学 3/4：强迫循环者',
+      body: '强迫会回头反刍并带快同伴，别只守出生点。\n点击已建塔可查看数值、升级或拆除。',
+    },
+    4: {
+      title: '教学 4/4：自责伪装者',
+      body: '自责带伪装，普通塔很难稳定锁定。\n共鸣塔伤害低，但能破隐和减速，放在路线交汇或核心前。',
+    },
   },
 };
 let enemyMinWave: Record<EnemyKind, number> = {
@@ -201,7 +214,7 @@ let bossCombatConfig: BossCombatConfig = {
   coreMinDamage: 2,
   waveSkills: {
     5: 'anxiety_core',
-    10: 'depression_core',
+    10: 'obsession_core',
   },
   skills: {
     anxiety_core: {
@@ -213,12 +226,36 @@ let bossCombatConfig: BossCombatConfig = {
       minion: { kind: 'anxiety', hpMul: 1.05, speedMul: 1.2, pathBias: 'short', skills: ['rush'] },
     },
     depression_core: {
-      displayName: '执念',
+      displayName: '抑郁重雾',
       auraSpeedMul: 1,
       enragedDamageMul: 1,
       shieldMaxHpRatio: 0.1,
       enragedDamageTakenMul: 0.8,
       minion: { kind: 'depression', hpMul: 1.05, speedMul: 1, pathBias: 'short', skills: [] },
+    },
+    obsession_core: {
+      displayName: '执念循环',
+      auraSpeedMul: 1,
+      enragedDamageMul: 1,
+      shieldMaxHpRatio: 0.1,
+      enragedDamageTakenMul: 0.8,
+      minion: { kind: 'obsession', hpMul: 1.05, speedMul: 1.05, pathBias: 'edge', skills: ['split'] },
+    },
+    guilt_core: {
+      displayName: '自责审判',
+      auraSpeedMul: 1,
+      enragedDamageMul: 1,
+      shieldMaxHpRatio: 0.08,
+      enragedDamageTakenMul: 0.88,
+      minion: { kind: 'guilt', hpMul: 1.05, speedMul: 1, pathBias: 'long', skills: ['stealth'] },
+    },
+    ptsd_core: {
+      displayName: '裂隙闪回',
+      auraSpeedMul: 1,
+      enragedDamageMul: 1,
+      shieldMaxHpRatio: 0.08,
+      enragedDamageTakenMul: 0.9,
+      minion: { kind: 'ptsd', hpMul: 1.05, speedMul: 1, pathBias: 'edge', skills: [] },
     },
   },
 };
@@ -228,7 +265,9 @@ export async function loadExternalConfig(): Promise<void> {
   loaded = true;
 
   try {
+    // 所有 CSV 表一次性加载并整体校验；任意表失败就回退到内置默认值，避免半配置状态。
     const loadedTables = [
+      'level_config.csv',
       'tower_config.csv',
       'enemy_config.csv',
       'wave_config.csv',
@@ -238,6 +277,7 @@ export async function loadExternalConfig(): Promise<void> {
       'map_routes.csv',
       'map_build_cells.csv',
       'map_route_rules.csv',
+      'map_elements.csv',
       'enemy_route_preferences.csv',
       'route_strategy_weights.csv',
       'mind_cache_config.csv',
@@ -246,6 +286,7 @@ export async function loadExternalConfig(): Promise<void> {
       'boss_combat_config.csv',
     ];
     const [
+      levelRows,
       towerRows,
       enemyRows,
       waveRows,
@@ -255,6 +296,7 @@ export async function loadExternalConfig(): Promise<void> {
       routeRows,
       buildCellRows,
       routeRuleRows,
+      mapElementRows,
       enemyRoutePreferenceRows,
       routeStrategyWeightRows,
       mindCacheRows,
@@ -266,6 +308,7 @@ export async function loadExternalConfig(): Promise<void> {
     ]);
 
     validateConfigTables({
+      levelRows,
       towerRows,
       enemyRows,
       waveRows,
@@ -275,6 +318,7 @@ export async function loadExternalConfig(): Promise<void> {
       routeRows,
       buildCellRows,
       routeRuleRows,
+      mapElementRows,
       enemyRoutePreferenceRows,
       routeStrategyWeightRows,
       mindCacheRows,
@@ -285,10 +329,10 @@ export async function loadExternalConfig(): Promise<void> {
 
     applyTowerConfig(towerRows);
     applyEnemyConfig(enemyRows);
-    setConfiguredBaseWaves(buildWavesFromRows(waveRows, spawnRows));
+    setConfiguredLevelSpecs(buildLevelSpecsFromRows(levelRows, waveRows, spawnRows));
     applyAiSafetyConfig(safetyRows);
     applyTutorialConfig(tutorialRows);
-    setConfiguredMapConfig(buildMapConfig(routeRows, buildCellRows, routeRuleRows));
+    setConfiguredMapConfig(buildMapConfig(routeRows, buildCellRows, routeRuleRows, mapElementRows, levelRows));
     setRouteStrategyConfig(buildRouteStrategyConfig(enemyRoutePreferenceRows, routeStrategyWeightRows));
     applyMindCacheConfig(mindCacheRows);
     applyDifficultyConfig(difficultyRows);
@@ -318,8 +362,8 @@ export function getConfigLoadReport(): ConfigLoadReport {
   return configLoadReport;
 }
 
-export function getTutorialTip(waveIndex: number): TutorialTip | null {
-  return tutorialTips[waveIndex] ?? null;
+export function getTutorialTip(waveIndex: number, levelId = 'level_1'): TutorialTip | null {
+  return tutorialTips[levelId]?.[waveIndex] ?? tutorialTips.level_1?.[waveIndex] ?? null;
 }
 
 export function getMindCacheConfig(): MindCacheConfig {
@@ -367,14 +411,26 @@ ${skillLines}
 }
 
 async function fetchCsv(filename: string): Promise<CsvRow[]> {
+  // Vite 部署到子路径时 BASE_URL 会带前缀，配置文件路径必须跟随它。
   const base = import.meta.env.BASE_URL || '/';
   const url = `${base.replace(/\/$/, '')}/config/${filename}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${filename}: HTTP ${res.status}`);
-  return parseCsv(await res.text());
+  return parseCsv(decodeCsv(await res.arrayBuffer()));
+}
+
+function decodeCsv(buffer: ArrayBuffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    // Windows Excel 常把中文 CSV 另存为 ANSI/GBK。浏览器默认 UTF-8 会把中文表头解坏，
+    // 导致运行时校验找不到“中文名”等列；这里兜底兼容 GB18030。
+    return new TextDecoder('gb18030').decode(buffer);
+  }
 }
 
 function parseCsv(text: string): CsvRow[] {
+  // 简单 CSV 解析器：支持 BOM、引号包裹字段和双引号转义，足够覆盖当前配置表。
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = '';
@@ -429,6 +485,8 @@ function parseCsv(text: string): CsvRow[] {
 }
 
 function validateConfigTables(tables: ExternalConfigTables): void {
+  // 加载前先做结构和范围校验，后续 apply 阶段就可以只关心映射逻辑。
+  requireRows('level_config.csv', tables.levelRows);
   requireRows('tower_config.csv', tables.towerRows);
   requireRows('enemy_config.csv', tables.enemyRows);
   requireRows('wave_config.csv', tables.waveRows);
@@ -438,6 +496,7 @@ function validateConfigTables(tables: ExternalConfigTables): void {
   requireRows('map_routes.csv', tables.routeRows);
   requireRows('map_build_cells.csv', tables.buildCellRows);
   requireRows('map_route_rules.csv', tables.routeRuleRows);
+  requireRows('map_elements.csv', tables.mapElementRows);
   requireRows('enemy_route_preferences.csv', tables.enemyRoutePreferenceRows);
   requireRows('route_strategy_weights.csv', tables.routeStrategyWeightRows);
   requireRows('mind_cache_config.csv', tables.mindCacheRows);
@@ -445,13 +504,14 @@ function validateConfigTables(tables: ExternalConfigTables): void {
   requireRows('wave_scaling_config.csv', tables.waveScalingRows);
   requireRows('boss_combat_config.csv', tables.bossCombatRows);
 
+  const levelIds = validateLevelRows(tables.levelRows);
   validateTowerRows(tables.towerRows);
   validateEnemyRows(tables.enemyRows);
-  validateWaveRows(tables.waveRows);
-  validateSpawnRows(tables.spawnRows);
+  validateWaveRows(tables.waveRows, levelIds);
+  validateSpawnRows(tables.spawnRows, levelIds);
   validateSafetyRows(tables.safetyRows);
-  validateTutorialRows(tables.tutorialRows);
-  validateMapRows(tables.routeRows, tables.buildCellRows, tables.routeRuleRows);
+  validateTutorialRows(tables.tutorialRows, levelIds);
+  validateMapRows(tables.routeRows, tables.buildCellRows, tables.routeRuleRows, tables.mapElementRows, levelIds);
   validateRouteStrategyRows(tables.enemyRoutePreferenceRows, tables.routeStrategyWeightRows);
   validateKeyValueRows('mind_cache_config.csv', tables.mindCacheRows, [
     'base_count',
@@ -512,22 +572,31 @@ function validateEnemyRows(rows: CsvRow[]): void {
   }
 }
 
-function validateWaveRows(rows: CsvRow[]): void {
-  const seen = new Set<number>();
+function validateWaveRows(rows: CsvRow[], levelIds: Set<string>): void {
+  const seen = new Map<string, Set<number>>();
   for (const row of rows) {
+    const levelId = row.level_id || 'level_1';
+    if (!levelIds.has(levelId)) configError('wave_config.csv', row, 'level_id', `unknown level "${levelId}"`);
     const wave = expectNumber('wave_config.csv', row, '波次', { min: 1, max: 10, integer: true });
-    seen.add(wave);
+    if (!seen.has(levelId)) seen.set(levelId, new Set());
+    seen.get(levelId)!.add(wave);
     expectEnum('wave_config.csv', row, '是否Boss', ['是', '否']);
     expectEnum('wave_config.csv', row, '基础阵型', formations);
     expectNumber('wave_config.csv', row, '本波念力补给', { min: 0 });
   }
-  for (let wave = 1; wave <= 10; wave++) {
-    if (!seen.has(wave)) throw new Error(`[config] wave_config.csv missing wave ${wave}`);
+  for (const levelId of levelIds) {
+    const waves = seen.get(levelId) ?? new Set<number>();
+    for (let wave = 1; wave <= 10; wave++) {
+      if (!waves.has(wave)) throw new Error(`[config] wave_config.csv missing ${levelId} wave ${wave}`);
+    }
   }
 }
 
-function validateSpawnRows(rows: CsvRow[]): void {
+function validateSpawnRows(rows: CsvRow[], levelIds: Set<string>): void {
+  // 刷怪表是最容易破坏游戏节奏的表，所以同时校验数量、延迟、倍率和技能枚举。
   for (const row of rows) {
+    const levelId = row.level_id || 'level_1';
+    if (!levelIds.has(levelId)) configError('wave_spawn_groups.csv', row, 'level_id', `unknown level "${levelId}"`);
     expectNumber('wave_spawn_groups.csv', row, '波次', { min: 1, max: 10, integer: true });
     expectNumber('wave_spawn_groups.csv', row, '组序', { min: 1, integer: true });
     expectEnum('wave_spawn_groups.csv', row, '心魔', enemyKinds);
@@ -556,32 +625,69 @@ function validateSafetyRows(rows: CsvRow[]): void {
   }
 }
 
-function validateTutorialRows(rows: CsvRow[]): void {
+function validateTutorialRows(rows: CsvRow[], levelIds: Set<string>): void {
   for (const row of rows) {
+    const levelId = row.level_id || 'level_1';
+    if (!levelIds.has(levelId)) configError('tutorial_config.csv', row, 'level_id', `unknown level "${levelId}"`);
     expectNumber('tutorial_config.csv', row, '波次', { min: 1, max: 10, integer: true });
     if (!row['标题']) configError('tutorial_config.csv', row, '标题', 'is required');
     if (!row['正文']) configError('tutorial_config.csv', row, '正文', 'is required');
   }
 }
 
-function validateMapRows(routeRows: CsvRow[], buildCellRows: CsvRow[], routeRuleRows: CsvRow[]): void {
+function validateMapRows(
+  routeRows: CsvRow[],
+  buildCellRows: CsvRow[],
+  routeRuleRows: CsvRow[],
+  mapElementRows: CsvRow[],
+  levelIds: Set<string>,
+): void {
   for (const row of routeRows) {
+    validateLevelRef('map_routes.csv', row, levelIds);
     expectEnum('map_routes.csv', row, 'route', routeVariants);
     expectNumber('map_routes.csv', row, 'seq', { min: 1, integer: true });
     expectNumber('map_routes.csv', row, 'col', { min: 0, integer: true });
     expectNumber('map_routes.csv', row, 'row', { min: 0, integer: true });
   }
   for (const row of buildCellRows) {
+    validateLevelRef('map_build_cells.csv', row, levelIds);
     expectEnum('map_build_cells.csv', row, 'route', routeVariants);
     expectNumber('map_build_cells.csv', row, 'col', { min: 0, integer: true });
     expectNumber('map_build_cells.csv', row, 'row', { min: 0, integer: true });
   }
   for (const row of routeRuleRows) {
+    validateLevelRef('map_route_rules.csv', row, levelIds);
     expectNumber('map_route_rules.csv', row, 'min_wave', { min: 1, max: 10, integer: true });
     expectNumber('map_route_rules.csv', row, 'max_wave', { min: 1, max: 10, integer: true, optional: true });
     expectEnum('map_route_rules.csv', row, 'primary_route', routeVariants);
     expectRouteList('map_route_rules.csv', row, 'open_routes', row.open_routes);
   }
+  for (const row of mapElementRows) {
+    validateLevelRef('map_elements.csv', row, levelIds);
+    if (!row.id) configError('map_elements.csv', row, 'id', 'is required');
+    expectEnum('map_elements.csv', row, 'kind', mapElementKinds);
+    expectNumber('map_elements.csv', row, 'wave_start', { min: 1, max: 10, integer: true });
+    expectNumber('map_elements.csv', row, 'wave_end', { min: 1, max: 10, integer: true, optional: true });
+    expectNumber('map_elements.csv', row, 'col', { min: 0, integer: true });
+    expectNumber('map_elements.csv', row, 'row', { min: 0, integer: true });
+    expectNumber('map_elements.csv', row, 'radius_cells', { min: 0 });
+    expectNumber('map_elements.csv', row, 'hp', { min: 0 });
+    expectNumber('map_elements.csv', row, 'reward', { min: 0 });
+    expectNumber('map_elements.csv', row, 'cooldown_ms', { min: 0 });
+    expectNumber('map_elements.csv', row, 'effect_mul', { min: 0 });
+    if (row.route) expectEnum('map_elements.csv', row, 'route', routeVariants);
+  }
+  const elementLevels = new Set(mapElementRows.map((row) => row.level_id || 'level_1'));
+  for (const levelId of levelIds) {
+    if (levelId !== 'level_1' && !elementLevels.has(levelId)) {
+      throw new Error(`[config] map_elements.csv missing elements for ${levelId}`);
+    }
+  }
+}
+
+function validateLevelRef(filename: string, row: CsvRow, levelIds: Set<string>): void {
+  const levelId = row.level_id || 'level_1';
+  if (!levelIds.has(levelId)) configError(filename, row, 'level_id', `unknown level "${levelId}"`);
 }
 
 function validateRouteStrategyRows(preferenceRows: CsvRow[], weightRows: CsvRow[]): void {
@@ -632,9 +738,9 @@ function validateBossCombatRows(rows: CsvRow[]): void {
       expectNumber('boss_combat_config.csv', row, 'value', { min: 0 });
     } else if (row.category === 'wave_skill') {
       expectNumber('boss_combat_config.csv', row, 'key', { min: 1, max: 10, integer: true });
-      expectEnum('boss_combat_config.csv', row, 'value', ['anxiety_core', 'depression_core']);
+      expectEnum('boss_combat_config.csv', row, 'value', [...BOSS_SKILL_KINDS]);
     } else {
-      expectEnum('boss_combat_config.csv', row, 'key', ['anxiety_core', 'depression_core']);
+      expectEnum('boss_combat_config.csv', row, 'key', [...BOSS_SKILL_KINDS]);
       if (row.category === 'minion_kind') expectEnum('boss_combat_config.csv', row, 'value', enemyKinds);
       if (row.category === 'minion_path_bias') expectEnum('boss_combat_config.csv', row, 'value', pathBiases);
       if (row.category === 'minion_skills') expectSkillList('boss_combat_config.csv', row, 'value', row.value, '|');
@@ -672,6 +778,23 @@ function validateKeyValueRows(
 
 function requireRows(filename: string, rows: CsvRow[]): void {
   if (!rows.length) throw new Error(`[config] ${filename} has no data rows`);
+}
+
+function validateLevelRows(rows: CsvRow[]): Set<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const id = row.level_id || row.id;
+    if (!id) configError('level_config.csv', row, 'level_id', 'is required');
+    if (ids.has(id)) configError('level_config.csv', row, 'level_id', `duplicate "${id}"`);
+    ids.add(id);
+    if (!row['中文名']) configError('level_config.csv', row, '中文名', 'is required');
+    if (!row['主题']) configError('level_config.csv', row, '主题', 'is required');
+    expectEnum('level_config.csv', row, '规则', levelRules);
+    expectNumber('level_config.csv', row, '全局HP倍率', { min: 0 });
+    expectNumber('level_config.csv', row, '全局速度倍率', { min: 0 });
+    expectNumber('level_config.csv', row, '念力补给倍率', { min: 0 });
+  }
+  return ids;
 }
 
 function expectEnum<T extends string>(filename: string, row: CsvRow, field: string, allowed: readonly T[]): T {
@@ -749,6 +872,7 @@ function configError(filename: string, row: CsvRow, field: string, message: stri
 }
 
 function applyTowerConfig(rows: CsvRow[]): void {
+  // CSV 只覆盖数值和文案，运行时对象引用保持不变，避免引用方失效。
   for (const row of rows) {
     const kind = asTowerKind(row.id);
     if (!kind) continue;
@@ -790,6 +914,7 @@ function applyEnemyConfig(rows: CsvRow[]): void {
 }
 
 function applyAiSafetyConfig(rows: CsvRow[]): void {
+  // 安全阀控制教学期开放节奏，并约束复盘 Agent 的侵略度输出。
   const nextEnemyMin = { ...enemyMinWave };
   const nextSkillMin = { ...skillMinWave };
   const nextAggression: AggressionRange[] = [];
@@ -820,19 +945,46 @@ function applyAiSafetyConfig(rows: CsvRow[]): void {
 }
 
 function applyTutorialConfig(rows: CsvRow[]): void {
-  const nextTips: Record<number, TutorialTip> = {};
+  const nextTips: Record<string, Record<number, TutorialTip>> = {};
   for (const row of rows) {
     const wave = numberValue(row['波次']);
     if (!wave || !row['标题']) continue;
-    nextTips[wave] = {
+    const levelId = row.level_id || 'level_1';
+    if (!nextTips[levelId]) nextTips[levelId] = {};
+    nextTips[levelId][wave] = {
       title: row['标题'],
       body: row['正文'],
+      routeNote: row['动态路线说明'] || undefined,
     };
   }
   if (Object.keys(nextTips).length) tutorialTips = nextTips;
 }
 
-function buildWavesFromRows(waveRows: CsvRow[], spawnRows: CsvRow[]): WaveSpec[] {
+function buildLevelSpecsFromRows(levelRows: CsvRow[], waveRows: CsvRow[], spawnRows: CsvRow[]): LevelSpec[] {
+  const levels = levelRows.map((row): LevelSpec => {
+    const id = row.level_id || row.id || 'level_1';
+    return {
+      id,
+      name: row['中文名'] || id,
+      theme: row['主题'] || '',
+      rule: asLevelRule(row['规则']) ?? 'tutorial',
+      globalHpMul: numberValue(row['全局HP倍率']) ?? 1,
+      globalSpeedMul: numberValue(row['全局速度倍率']) ?? 1,
+      mindGiftMul: numberValue(row['念力补给倍率']) ?? 1,
+      waves: buildWavesFromRows(
+        waveRows.filter((waveRow) => (waveRow.level_id || 'level_1') === id),
+        spawnRows.filter((spawnRow) => (spawnRow.level_id || 'level_1') === id),
+        id,
+      ),
+    };
+  });
+
+  if (!levels.length) throw new Error('level_config produced 0 levels');
+  return levels;
+}
+
+function buildWavesFromRows(waveRows: CsvRow[], spawnRows: CsvRow[], levelId = 'level_1'): WaveSpec[] {
+  // wave_config 定义波次骨架，wave_spawn_groups 展开成逐个 EnemySpawnSpec。
   const waves = waveRows.map((row): WaveSpec => {
     const index = numberValue(row['波次']) ?? 1;
     const formation = asFormation(row['基础阵型']) ?? 'scattered';
@@ -868,39 +1020,70 @@ function buildWavesFromRows(waveRows: CsvRow[], spawnRows: CsvRow[]): WaveSpec[]
   const built = waves
     .filter((wave) => wave.spawns.length > 0)
     .sort((a, b) => a.index - b.index);
-  if (built.length !== 10) throw new Error(`wave_config produced ${built.length} waves, expected 10`);
+  if (built.length !== 10) throw new Error(`wave_config produced ${built.length} waves for ${levelId}, expected 10`);
   return built;
 }
 
-function buildMapConfig(routeRows: CsvRow[], buildCellRows: CsvRow[], routeRuleRows: CsvRow[]): MapConfigData {
-  const routeWaypoints: MapConfigData['routeWaypoints'] = { short: [], long: [], edge: [] };
-  const buildCells: MapConfigData['buildCells'] = { short: [], long: [], edge: [] };
+function buildMapConfig(
+  routeRows: CsvRow[],
+  buildCellRows: CsvRow[],
+  routeRuleRows: CsvRow[],
+  mapElementRows: CsvRow[],
+  levelRows: CsvRow[],
+): MapConfigData {
+  const levelIds = levelRows.map((row) => row.level_id || row.id || 'level_1');
+  const defaultLevelId = levelIds.includes('level_1') ? 'level_1' : (levelIds[0] ?? 'level_1');
+  const levels: MapConfigData['levels'] = {};
 
-  for (const row of routeRows) {
-    const route = asRouteVariant(row.route);
-    const col = numberValue(row.col);
-    const rowIndex = numberValue(row.row);
-    if (!route || col == null || rowIndex == null) continue;
-    routeWaypoints[route].push({ col, row: rowIndex });
-  }
-  for (const route of routeVariants) {
-    routeWaypoints[route].sort((a, b) => {
-      const aSeq = numberValue(routeRows.find((row) => row.route === route && Number(row.col) === a.col && Number(row.row) === a.row)?.seq) ?? 0;
-      const bSeq = numberValue(routeRows.find((row) => row.route === route && Number(row.col) === b.col && Number(row.row) === b.row)?.seq) ?? 0;
-      return aSeq - bSeq;
-    });
-    if (routeWaypoints[route].length < 2) throw new Error(`map_routes missing route ${route}`);
-  }
-
-  for (const row of buildCellRows) {
-    const route = asRouteVariant(row.route);
-    const col = numberValue(row.col);
-    const rowIndex = numberValue(row.row);
-    if (!route || col == null || rowIndex == null) continue;
-    buildCells[route].push({ col, row: rowIndex });
+  for (const levelId of levelIds) {
+    const routeWaypoints = {
+      short: buildRouteWaypoints(routeRows, levelId, 'short'),
+      long: buildRouteWaypoints(routeRows, levelId, 'long'),
+      edge: buildRouteWaypoints(routeRows, levelId, 'edge'),
+    };
+    const buildCells = {
+      short: buildRouteCells(buildCellRows, levelId, 'short'),
+      long: buildRouteCells(buildCellRows, levelId, 'long'),
+      edge: buildRouteCells(buildCellRows, levelId, 'edge'),
+    };
+    const routeOpenRules = buildRouteOpenRules(routeRuleRows, levelId);
+    const elements = buildMapElements(mapElementRows, levelId);
+    if (!routeOpenRules.length) throw new Error(`map_route_rules is empty for ${levelId}`);
+    if (levelId !== 'level_1' && !elements.length) throw new Error(`map_elements is empty for ${levelId}`);
+    levels[levelId] = { routeWaypoints, buildCells, routeOpenRules, elements };
   }
 
-  const routeOpenRules = routeRuleRows
+  return { levels, defaultLevelId };
+}
+
+function buildRouteWaypoints(rows: CsvRow[], levelId: string, route: RouteVariant): GridPos[] {
+  const points = rows
+    .filter((row) => (row.level_id || 'level_1') === levelId && row.route === route)
+    .sort((a, b) => (numberValue(a.seq) ?? 0) - (numberValue(b.seq) ?? 0))
+    .map((row) => {
+      const col = numberValue(row.col);
+      const rowIndex = numberValue(row.row);
+      return col == null || rowIndex == null ? null : { col, row: rowIndex };
+    })
+    .filter((cell): cell is GridPos => cell != null);
+  if (points.length < 2) throw new Error(`map_routes missing ${levelId} route ${route}`);
+  return points;
+}
+
+function buildRouteCells(rows: CsvRow[], levelId: string, route: RouteVariant): GridPos[] {
+  return rows
+    .filter((row) => (row.level_id || 'level_1') === levelId && row.route === route)
+    .map((row) => {
+      const col = numberValue(row.col);
+      const rowIndex = numberValue(row.row);
+      return col == null || rowIndex == null ? null : { col, row: rowIndex };
+    })
+    .filter((cell): cell is GridPos => cell != null);
+}
+
+function buildRouteOpenRules(rows: CsvRow[], levelId: string): MapConfigData['levels'][string]['routeOpenRules'] {
+  return rows
+    .filter((row) => (row.level_id || 'level_1') === levelId)
     .map((row) => {
       const primaryRoute = asRouteVariant(row.primary_route);
       const minWave = numberValue(row.min_wave);
@@ -912,16 +1095,42 @@ function buildMapConfig(routeRows: CsvRow[], buildCellRows: CsvRow[], routeRuleR
       if (!primaryRoute || minWave == null || !openRoutes.length) return null;
       return { minWave, maxWave, primaryRoute, openRoutes };
     })
-    .filter((rule): rule is MapConfigData['routeOpenRules'][number] => rule != null);
+    .filter((rule): rule is MapConfigData['levels'][string]['routeOpenRules'][number] => rule != null);
+}
 
-  if (!routeOpenRules.length) throw new Error('map_route_rules is empty');
-  return { routeWaypoints, buildCells, routeOpenRules };
+function buildMapElements(rows: CsvRow[], levelId: string): MapElementSpec[] {
+  return rows
+    .filter((row) => (row.level_id || 'level_1') === levelId)
+    .map((row) => {
+      const kind = asMapElementKind(row.kind);
+      const col = numberValue(row.col);
+      const rowIndex = numberValue(row.row);
+      if (!row.id || !kind || col == null || rowIndex == null) return null;
+      return {
+        levelId,
+        id: row.id,
+        kind,
+        waveStart: numberValue(row.wave_start) ?? 1,
+        waveEnd: row.wave_end ? numberValue(row.wave_end) : null,
+        cell: { col, row: rowIndex },
+        radiusCells: numberValue(row.radius_cells) ?? 0,
+        hp: numberValue(row.hp) ?? 0,
+        reward: numberValue(row.reward) ?? 0,
+        cooldownMs: numberValue(row.cooldown_ms) ?? 0,
+        effectMul: numberValue(row.effect_mul) ?? 1,
+        pairId: row.pair_id ?? '',
+        route: asRouteVariant(row.route),
+        note: row.note ?? '',
+      };
+    })
+    .filter((element): element is MapElementSpec => element != null);
 }
 
 function buildRouteStrategyConfig(
   preferenceRows: CsvRow[],
   weightRows: CsvRow[],
 ): Partial<RouteStrategyConfig> {
+  // enemy_route_preferences 只描述优先级顺序，权重由 route_strategy_weights 单独配置。
   const preferences: RouteStrategyConfig['enemyRoutePreferences'] = {
     anxiety: [],
     depression: [],
@@ -998,16 +1207,16 @@ function applyWaveScalingConfig(rows: CsvRow[]): void {
 }
 
 function applyBossCombatConfig(rows: CsvRow[]): void {
+  // BOSS 配置分为全局节奏、波次技能和技能明细三层，先深拷贝默认值再覆盖。
   const next: BossCombatConfig = {
     summonIntervalMs: bossCombatConfig.summonIntervalMs,
     coreTickIntervalMs: bossCombatConfig.coreTickIntervalMs,
     coreDamageFactor: bossCombatConfig.coreDamageFactor,
     coreMinDamage: bossCombatConfig.coreMinDamage,
     waveSkills: { ...bossCombatConfig.waveSkills },
-    skills: {
-      anxiety_core: cloneBossSkillConfig(bossCombatConfig.skills.anxiety_core),
-      depression_core: cloneBossSkillConfig(bossCombatConfig.skills.depression_core),
-    },
+    skills: Object.fromEntries(
+      BOSS_SKILL_KINDS.map((kind) => [kind, cloneBossSkillConfig(bossCombatConfig.skills[kind])]),
+    ) as Record<BossSkillKind, BossSkillConfig>,
   };
 
   for (const row of rows) {
@@ -1136,14 +1345,21 @@ function asSkillFlag(value: string): SkillFlag | null {
   return skillFlags.includes(value as SkillFlag) ? value as SkillFlag : null;
 }
 
+function asLevelRule(value: string): LevelRuleKind | null {
+  return levelRules.includes(value as LevelRuleKind) ? value as LevelRuleKind : null;
+}
+
+function asMapElementKind(value: string): MapElementKind | null {
+  return mapElementKinds.includes(value as MapElementKind) ? value as MapElementKind : null;
+}
+
 function asDifficultyKind(value: string): DifficultyKind | null {
   const difficulties: DifficultyKind[] = ['easy', 'normal', 'hard'];
   return difficulties.includes(value as DifficultyKind) ? value as DifficultyKind : null;
 }
 
 function asBossSkillKind(value: string): BossSkillKind | null {
-  const bossSkillKinds: BossSkillKind[] = ['anxiety_core', 'depression_core'];
-  return bossSkillKinds.includes(value as BossSkillKind) ? value as BossSkillKind : null;
+  return BOSS_SKILL_KINDS.includes(value as BossSkillKind) ? value as BossSkillKind : null;
 }
 
 function asBehavior(value: string): EnemyDef['behavior'] | null {

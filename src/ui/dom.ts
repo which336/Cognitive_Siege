@@ -1,4 +1,4 @@
-/** Tiny helpers for building DOM overlays without a framework. */
+/** 不依赖前端框架的 DOM 弹层小工具。 */
 
 export type DomOpts = {
   cls?: string;
@@ -35,9 +35,21 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 
 export function mountOverlay(root: HTMLElement): { close: () => void } {
   const overlay = el('div', { cls: 'cs-overlay' }, [root]);
+  let closed = false;
+  const stopPointerLeak = (event: Event) => {
+    event.stopPropagation();
+  };
+  for (const eventName of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'touchstart', 'touchend', 'wheel']) {
+    overlay.addEventListener(eventName, stopPointerLeak);
+  }
   document.body.appendChild(overlay);
   return {
     close: () => {
+      if (closed) return;
+      closed = true;
+      // Keep the fading overlay interactive until it is removed. Otherwise the
+      // release/click that closed a modal can fall through to Phaser buttons
+      // underneath, e.g. Settings "Save" opening the config report.
       overlay.style.transition = 'opacity 0.25s ease';
       overlay.style.opacity = '0';
       setTimeout(() => overlay.remove(), 260);
@@ -45,7 +57,7 @@ export function mountOverlay(root: HTMLElement): { close: () => void } {
   };
 }
 
-/** Typewriter effect - returns a Promise that resolves once complete. */
+/** 打字机效果；动画完成后 resolve。 */
 export function typewriter(target: HTMLElement, text: string, msPerChar = 28): Promise<void> {
   return new Promise(resolve => {
     target.textContent = '';

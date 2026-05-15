@@ -8,6 +8,7 @@ import {
 } from '../../types';
 
 export function summarizeBattleForProof(summary: BattleSummary): AgentProofBattleSummary {
+  // 复盘证明面板只需要聚合指标，避免把完整战斗日志再次塞回 UI。
   const deathsByTower: AgentProofBattleSummary['deathsByTower'] = {};
   const perKind: AgentProofBattleSummary['perKind'] = {};
   const towerLayout: AgentProofBattleSummary['towerLayout'] = {};
@@ -52,6 +53,7 @@ export function summarizeBattleForProof(summary: BattleSummary): AgentProofBattl
 }
 
 export function summarizeWaveForProof(wave: WaveSpec): AgentProofWaveSummary {
+  // 记录策略应用前后的波次轮廓，方便玩家确认 Agent 真的改动了下一波。
   const kinds: AgentProofWaveSummary['kinds'] = {};
   const skills: AgentProofWaveSummary['skills'] = {};
   const pathBiases = new Set(wave.spawns.map(s => s.pathBias));

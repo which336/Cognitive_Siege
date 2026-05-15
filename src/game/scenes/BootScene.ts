@@ -34,6 +34,12 @@ export class BootScene extends Phaser.Scene {
     this.load.image('tile-path', 'assets/art/tile-path.png');
     this.load.image('tile-path-active', 'assets/art/tile-path-active.png');
 
+    this.load.image('map-breath-vent', 'assets/art/map-breath-vent.png');
+    this.load.image('map-mirror-gate', 'assets/art/map-mirror-gate.png');
+    this.load.image('map-dry-well', 'assets/art/map-dry-well.png');
+    this.load.image('map-fracture-rift', 'assets/art/map-fracture-rift.png');
+    this.load.image('map-trial-obelisk', 'assets/art/map-trial-obelisk.png');
+
     this.load.image('fx-memory', 'assets/art/fx-memory.png');
     this.load.image('fx-belief', 'assets/art/fx-belief.png');
     this.load.image('fx-resonance', 'assets/art/fx-resonance.png');

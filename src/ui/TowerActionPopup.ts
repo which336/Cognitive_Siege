@@ -3,7 +3,7 @@ import { TOWER_DEFS } from '../game/data/towers';
 import { el } from './dom';
 
 export interface TowerActionPopupOpts {
-  /** Anchor point in screen-space pixels (game canvas already absolutely positioned). */
+  /** 屏幕空间锚点像素；游戏 canvas 已经是绝对定位后的坐标。 */
   x: number;
   y: number;
   kind: TowerKind;
@@ -11,7 +11,7 @@ export interface TowerActionPopupOpts {
   damageLabel: string;
   rangeLabel: string;
   fireRateLabel: string;
-  upgradeCost: number | null;   // null when maxed
+  upgradeCost: number | null;   // 满级时为 null。
   sellRefund: number;
   canAfford: boolean;
   onUpgrade: () => void;
@@ -21,7 +21,7 @@ export interface TowerActionPopupOpts {
 
 export function showTowerActionPopup(opts: TowerActionPopupOpts): { close: () => void } {
   const def = TOWER_DEFS[opts.kind];
-  // Backdrop catches clicks outside the popup; closes it.
+  // 背景层捕获弹层外点击，用于关闭菜单。
   const backdrop = el('div', {
     cls: 'cs-tower-popup-backdrop',
     on: {
@@ -93,7 +93,7 @@ export function showTowerActionPopup(opts: TowerActionPopupOpts): { close: () =>
   document.body.appendChild(backdrop);
   document.body.appendChild(card);
 
-  // Make sure popup stays inside viewport
+  // 确保弹层不越出浏览器视口。
   requestAnimationFrame(() => {
     const r = card.getBoundingClientRect();
     const margin = 8;

@@ -17,6 +17,6 @@ export function saveSettings(s: UserSettings): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {
-    /* ignore */
+    /* 忽略本地存储失败 */
   }
 }

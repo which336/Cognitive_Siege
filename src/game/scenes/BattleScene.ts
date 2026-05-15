@@ -3,13 +3,16 @@ import {
   Grid,
   buildProjectedLevel,
   createMapProjection,
+  openRoutesForPrimary,
   resolveRouteVariant,
   routeVariantLabel,
 } from '../systems/Grid';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { MindCache } from '../entities/MindCache';
+import { MapElementActor } from '../entities/MapElementActor';
 import { ALL_TOWER_KINDS, TOWER_DEFS } from '../data/towers';
+import { ENEMY_DEFS } from '../data/enemies';
 import {
   getBossCombatConfig,
   getDifficultyConfig,
@@ -17,6 +20,7 @@ import {
   getTutorialTip,
   getWaveScalingConfig,
   type BossSkillKind,
+  type TutorialTip,
 } from '../data/configLoader';
 import {
   GridPos,
@@ -29,10 +33,11 @@ import {
   BattleSummary,
   CombatLogEntry,
   EnemySpawnSpec,
+  LevelSpec,
   MapProjection,
   RouteVariant,
 } from '../../types';
-import { buildBaseWaves, TOTAL_WAVES } from '../data/waves';
+import { buildBaseWaves, DEFAULT_LEVEL_ID, getLevelSpec, TOTAL_WAVES } from '../data/waves';
 import { PathPool, pickRouteForEnemy } from '../systems/WaveSystem';
 import { BattleLog } from '../systems/BattleLog';
 import { applyStrategy } from '../systems/EvolutionApplier';
@@ -46,7 +51,7 @@ import { openNegotiation } from '../../ui/NegotiationPanel';
 import { showSettings } from '../../ui/SettingsPanel';
 import { showHelp } from '../../ui/HelpPanel';
 import { loadSettings } from '../../settings';
-import { applyChoiceTag, BOSS_PERSONAS, fallbackVignette, NEUTRAL_RESOLUTION, totalDialogueTurns } from '../data/fallback';
+import { applyChoiceTag, fallbackVignette, getBossPersona, NEUTRAL_RESOLUTION, totalDialogueTurns } from '../data/fallback';
 import { Sound } from '../systems/Audio';
 import { showTowerActionPopup } from '../../ui/TowerActionPopup';
 
@@ -85,14 +90,17 @@ interface ExportedWaveStats {
 }
 
 export class BattleScene extends Phaser.Scene {
-  // Layout
+  // 地图布局与路径投影。
   private grid!: Grid;
   private pathPool!: PathPool;
   private corePos!: GridPos;
   private spawnPos!: GridPos;
+  private spawnPositions!: Record<RouteVariant, GridPos>;
   private mapProjection!: MapProjection;
 
-  // Game state
+  // 全局游戏状态。
+  private selectedLevelId = DEFAULT_LEVEL_ID;
+  private currentLevel: LevelSpec = getLevelSpec(DEFAULT_LEVEL_ID);
   private waves: WaveSpec[] = [];
   private currentWaveIdx = 0;
   private phase: Phase = 'intro';
@@ -100,15 +108,16 @@ export class BattleScene extends Phaser.Scene {
   private sanity = 80;
   private sanityMax = 100;
 
-  // Game-time. Increments by deltaMs * speedMul each frame. ALL gameplay
-  // timers (tower cooldown, spawn schedule, slow expiry, hallucination) live
-  // in this frame so the speed toggle affects them uniformly.
+  // 游戏时间：每帧按 deltaMs * speedMul 递增。
+  // 塔冷却、刷怪、减速过期、幻觉检查等玩法计时都使用它，确保倍速影响一致。
   public gameTime = 0;
   private speedMul: 1 | 2 | 4 = 1;
   private hallucinationCheckAt = 0;
 
-  // Wave runtime
+  // 当前波次运行态。
   private spawnQueue: { spawnAt: number; spec: EnemySpawnSpec; isBossSpawn: boolean }[] = [];
+  private mirrorEchoQueue: { spawnAt: number; spec: EnemySpawnSpec; route: RouteVariant; progressRatio: number; pairId: string }[] = [];
+  private mirrorEchoTriggers = new WeakMap<Enemy, Set<string>>();
   private battleLog: BattleLog | null = null;
   private currentWaveStats: WaveStatsDraft | null = null;
   private runStats: ExportedWaveStats[] = [];
@@ -116,12 +125,14 @@ export class BattleScene extends Phaser.Scene {
   private nextBossCoreTickAt = 0;
   private nextBossSummonAt = 0;
 
-  // Entities
+  // 战场实体。
   private towers: Tower[] = [];
   private enemies: Enemy[] = [];
   private mindCaches: MindCache[] = [];
+  private mapElements: MapElementActor[] = [];
 
-  // UI
+  // Phaser 内 UI。
+  private hudLeftBg!: Phaser.GameObjects.Rectangle;
   private hudText!: Phaser.GameObjects.Text;
   private waveText!: Phaser.GameObjects.Text;
   private mindText!: Phaser.GameObjects.Text;
@@ -140,13 +151,20 @@ export class BattleScene extends Phaser.Scene {
   private tutorialBody!: Phaser.GameObjects.Text;
   private tutorialIcon!: Phaser.GameObjects.Image;
   private tutorialIconLabel!: Phaser.GameObjects.Text;
+  private tutorialToggleBg!: Phaser.GameObjects.Rectangle;
+  private tutorialToggleText!: Phaser.GameObjects.Text;
+  private tutorialToggleHit!: Phaser.GameObjects.Zone;
   private settingsBtn!: Phaser.GameObjects.Container;
   private codexBtn!: Phaser.GameObjects.Container;
   private menuBtn!: Phaser.GameObjects.Container;
   private toolbarButtons: { kind: TowerKind; container: Phaser.GameObjects.Container }[] = [];
   private selectedTowerKind: TowerKind | null = null;
   private sculptMode = false;
+  private lastBreathPhase: 'inhale' | 'exhale' | null = null;
+  private tutorialCollapsed = false;
+  private persistentBuildMessage: { text: string; color: string } | null = null;
   private hoverPreview!: Phaser.GameObjects.Container;
+  private msgBg!: Phaser.GameObjects.Rectangle;
   private msgText!: Phaser.GameObjects.Text;
 
   private gridGfx!: Phaser.GameObjects.Graphics;
@@ -158,43 +176,57 @@ export class BattleScene extends Phaser.Scene {
   private synapses: Phaser.GameObjects.Arc[] = [];
   private fragmentTimer: Phaser.Time.TimerEvent | null = null;
 
-  // Cached list of buildable cells for ambient decoration spawning.
+  // 缓存可建造格，供环境装饰和念力残堆刷新使用。
   private buildCells: GridPos[] = [];
   private playerBuildCells: GridPos[] = [];
+  private destroyedMapElementIds = new Set<string>();
 
-  // The review agent chooses a route family; each family opens 2-3 concrete
-  // routes, and individual spawns make weighted route picks from that set.
+  // 复盘 Agent 选择路线族；路线族会开放 2-3 条实际分支，单个敌人再按权重分路。
   private activePathKey: RouteKey = 'short';
   private waveMapAggression = new Map<number, number>();
 
-  // Tower interaction
+  // 塔交互弹层。
   private activePopupClose: (() => void) | null = null;
 
   constructor() { super({ key: 'BattleScene' }); }
 
+  init(data?: { levelId?: string }): void {
+    this.selectedLevelId = data?.levelId || DEFAULT_LEVEL_ID;
+  }
+
   create(): void {
     this.resetRunState();
+    this.currentLevel = getLevelSpec(this.selectedLevelId);
     this.cameras.main.setBackgroundColor('#0b0a18');
     const settings = loadSettings();
     const difficultyCfg = getDifficultyConfig(settings.difficulty);
     this.sanityMax = difficultyCfg.sanityMax;
     this.sanity = difficultyCfg.sanityStart;
-    this.mind = difficultyCfg.mindStart;
+    this.mind = this.startingMindForLevel(difficultyCfg.mindStart);
     this.tweens.timeScale = 1;
     this.time.timeScale = 1;
 
     const offsetY = 70;
     const offsetX = (this.scale.width - GRID_COLS * TILE) / 2;
-    this.waves = buildBaseWaves();
+    this.waves = buildBaseWaves(this.currentLevel.id);
     this.activePathKey = this.computeActivePathKey(this.waves[0]);
+    const initialForceOpenRoutes = this.openRoutesForWave(this.waves[0], this.activePathKey);
     const built = buildProjectedLevel(
       { cols: GRID_COLS, rows: GRID_ROWS, tileSize: TILE, offsetX, offsetY },
-      { activeRoute: this.activePathKey, waveIndex: 1, aggression: 0 },
+      {
+        activeRoute: this.activePathKey,
+        waveIndex: 1,
+        aggression: 0,
+        forceOpenRoutes: initialForceOpenRoutes,
+        levelId: this.currentLevel.id,
+        disabledMapElementIds: Array.from(this.destroyedMapElementIds),
+      },
     );
     this.grid = built.grid;
     this.pathPool = { short: built.pathCells, long: built.altPathCells, edge: built.edgePathCells };
     this.corePos = built.core;
     this.spawnPos = built.spawn;
+    this.spawnPositions = built.spawnPositions;
     this.mapProjection = built.projection;
 
     this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x0b0a18);
@@ -211,6 +243,7 @@ export class BattleScene extends Phaser.Scene {
     this.startFloatingFragments();
 
     this.drawPath(this.activePathKey);
+    this.syncMapElementsForWave();
     this.drawSpawnAndCore();
     this.buildHUD();
     this.buildToolbar();
@@ -231,7 +264,7 @@ export class BattleScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-SPACE', () => {
       if (this.phase === 'build') this.startWave();
     });
-    // Keyboard speed shortcut: 1 / 2 / 4
+    // 倍速快捷键：1 / 2 / 4。
     this.input.keyboard?.on('keydown-ONE',   () => this.setSpeed(1));
     this.input.keyboard?.on('keydown-TWO',   () => this.setSpeed(2));
     this.input.keyboard?.on('keydown-FOUR',  () => this.setSpeed(4));
@@ -240,9 +273,7 @@ export class BattleScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanupOnExit());
     this.events.once(Phaser.Scenes.Events.DESTROY,  () => this.cleanupOnExit());
 
-    // Obsession's "compulsive repeat" aura: when one of them loop-backs, every
-    // ally close to it on the field gets a short +20% speed kick, so the loop
-    // reads as collective rumination accelerating the wave instead of a bug.
+    // 强迫心魔反刍时给附近友军短暂加速，让“回头”读起来像群体反刍而不是寻路问题。
     this.events.off('obsession_loop');
     this.events.on('obsession_loop', (origin: Enemy) => this.applyObsessionLoopAura(origin));
 
@@ -256,7 +287,10 @@ export class BattleScene extends Phaser.Scene {
     this.towers = [];
     this.enemies = [];
     this.mindCaches = [];
+    this.mapElements = [];
     this.spawnQueue = [];
+    this.mirrorEchoQueue = [];
+    this.mirrorEchoTriggers = new WeakMap();
     this.battleLog = null;
     this.currentWaveStats = null;
     this.runStats = [];
@@ -269,13 +303,38 @@ export class BattleScene extends Phaser.Scene {
     this.toolbarButtons = [];
     this.selectedTowerKind = null;
     this.sculptMode = false;
+    this.lastBreathPhase = null;
     this.buildCells = [];
     this.playerBuildCells = [];
+    this.destroyedMapElementIds = new Set();
     this.synapses = [];
     this.fragmentTimer = null;
     this.activePathKey = 'short';
     this.waveMapAggression = new Map();
     this.activePopupClose = null;
+  }
+
+  private startingMindForLevel(baseMind: number): number {
+    if (this.currentLevel.rule !== 'scarcity') return baseMind;
+    return Math.max(30, Math.round(baseMind * this.currentLevel.mindGiftMul));
+  }
+
+  private levelHasAllUnlocks(): boolean {
+    return this.currentLevel.id !== DEFAULT_LEVEL_ID;
+  }
+
+  private forcedOpenRoutesForCurrentLevel(waveIndex: number, activeRoute: RouteVariant): RouteVariant[] | undefined {
+    if (this.currentLevel.rule !== 'fracture_edge') return undefined;
+    const routes: RouteVariant[] = waveIndex <= 2 ? ['short', 'edge'] : ['short', 'long', 'edge'];
+    if (!routes.includes(activeRoute)) routes.push(activeRoute);
+    return Array.from(new Set(routes));
+  }
+
+  private openRoutesForWave(wave: WaveSpec, activeRoute: RouteVariant): RouteVariant[] {
+    const ruleRoutes = openRoutesForPrimary(activeRoute, wave.index, this.currentLevel.id);
+    const levelForced = this.forcedOpenRoutesForCurrentLevel(wave.index, activeRoute) ?? [];
+    const spawnRoutes = wave.spawns.map((spawn) => resolveRouteVariant(spawn.pathBias, wave.index));
+    return Array.from(new Set<RouteVariant>([activeRoute, ...ruleRoutes, ...levelForced, ...spawnRoutes]));
   }
 
   private applyObsessionLoopAura(origin: Enemy): void {
@@ -294,7 +353,7 @@ export class BattleScene extends Phaser.Scene {
       }
     }
     if (lit > 0) {
-      // Brief radial flash from the origin so the player can SEE the aura propagate.
+      // 起点扩散一圈径向闪光，让玩家能看见加速光环的传播。
       const ring = this.add.circle(origin.body.x, origin.body.y, 8, 0xfbbf24, 0)
         .setStrokeStyle(2, 0xfbbf24, 0.8).setDepth(15);
       this.tweens.add({
@@ -332,18 +391,23 @@ export class BattleScene extends Phaser.Scene {
     const previousRoute = this.activePathKey;
     const activeRoute = this.computeActivePathKey(wave);
     const aggression = this.waveMapAggression.get(this.currentWaveIdx) ?? 0;
+    const forceOpenRoutes = this.openRoutesForWave(wave, activeRoute);
     const built = buildProjectedLevel(this.grid.cfg, {
       activeRoute,
       waveIndex: wave.index,
       aggression,
+      forceOpenRoutes,
       occupiedCells: this.occupiedTowerCells(),
       extraBuildCells: this.playerBuildCells,
+      levelId: this.currentLevel.id,
+      disabledMapElementIds: Array.from(this.destroyedMapElementIds),
     });
 
     this.grid = built.grid;
     this.pathPool = { short: built.pathCells, long: built.altPathCells, edge: built.edgePathCells };
     this.corePos = built.core;
     this.spawnPos = built.spawn;
+    this.spawnPositions = built.spawnPositions;
     this.mapProjection = built.projection;
     this.restoreTowerOccupancy();
 
@@ -351,6 +415,7 @@ export class BattleScene extends Phaser.Scene {
     this.collectBuildCells();
     this.drawDecoration();
     this.drawPath(activeRoute);
+    this.syncMapElementsForWave();
     this.syncMindCachesForMap();
     if (animate) this.playMapRebuildFx(previousRoute, activeRoute);
   }
@@ -363,9 +428,13 @@ export class BattleScene extends Phaser.Scene {
 
     const color = activeRoute === 'edge' ? 0x67e8f9 : activeRoute === 'long' ? 0xf472b6 : 0xa78bfa;
     const route = this.pathPool[activeRoute];
+    const spawnKeys = new Set(
+      Object.values(this.spawnPositions ?? { short: this.spawnPos, long: this.spawnPos, edge: this.spawnPos })
+        .map((cell) => this.keyOfCell(cell)),
+    );
     route.forEach((cell, index) => {
       if (index % 3 !== 0) return;
-      if ((cell.col === this.spawnPos.col && cell.row === this.spawnPos.row) ||
+      if (spawnKeys.has(this.keyOfCell(cell)) ||
           (cell.col === this.corePos.col && cell.row === this.corePos.row)) return;
       const p = this.grid.cellCenter(cell.col, cell.row);
       const pulse = this.add.rectangle(p.x, p.y, TILE - 8, TILE - 8, color, 0.5)
@@ -388,7 +457,7 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
-  // ===================== Layout drawing =====================
+  // ===================== 地图绘制 =====================
 
   private drawGrid(): void {
     const g = this.gridGfx;
@@ -480,8 +549,8 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /**
-   * Renders the full open route set for this wave. Enemies still pick one
-   * concrete branch by strategy weight, kind preference, and random noise.
+   * 绘制本波所有开放路线。
+   * 敌人仍会按复盘策略权重、心魔类型偏好和随机扰动选择其中一条实际分支。
    */
   private drawPath(activeKey: RouteKey): void {
     this.activePathKey = activeKey;
@@ -499,9 +568,11 @@ export class BattleScene extends Phaser.Scene {
     };
     for (const route of activeRoutes) collect(this.pathPool[route], routeCells);
 
-    // Skip the spawn / core cells — they have dedicated colored visuals drawn
-    // at higher depth and we don't want a flat purple tile washing them out.
-    const spawnKey = `${this.spawnPos.col},${this.spawnPos.row}`;
+    // 出生点和核心有专门的高层级视觉，不用普通路线格覆盖它们。
+    const spawnKeys = new Set(
+      Object.values(this.spawnPositions ?? { short: this.spawnPos, long: this.spawnPos, edge: this.spawnPos })
+        .map((cell) => `${cell.col},${cell.row}`),
+    );
     const coreKey  = `${this.corePos.col},${this.corePos.row}`;
     const hasPathArt = this.textures.exists('tile-path') && this.textures.exists('tile-path-active');
     const routeColor = (key: RouteKey) => key === 'short' ? 0xa78bfa : key === 'long' ? 0xf472b6 : 0x67e8f9;
@@ -520,7 +591,7 @@ export class BattleScene extends Phaser.Scene {
       const inactiveKeys = new Set<string>();
       collect(inactiveCells, inactiveKeys);
       for (const k of inactiveKeys) {
-        if (k === spawnKey || k === coreKey || routeCells.has(k)) continue;
+        if (spawnKeys.has(k) || k === coreKey || routeCells.has(k)) continue;
         const [c, r] = k.split(',').map(Number);
         const center = this.grid.cellCenter(c, r);
         g.fillStyle(0x2b163c, 0.96)
@@ -536,7 +607,7 @@ export class BattleScene extends Phaser.Scene {
       const isPrimary = route === activeKey;
       for (const cell of this.pathPool[route]) {
         const k = `${cell.col},${cell.row}`;
-        if (k === spawnKey || k === coreKey || drawnActiveCells.has(k)) continue;
+        if (spawnKeys.has(k) || k === coreKey || drawnActiveCells.has(k)) continue;
         drawnActiveCells.add(k);
         const center = this.grid.cellCenter(cell.col, cell.row);
         if (hasPathArt) {
@@ -558,7 +629,7 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
-  // ===================== Ambient decoration =====================
+  // ===================== 环境装饰 =====================
 
   private collectBuildCells(): void {
     this.buildCells = [];
@@ -570,24 +641,21 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /**
-   * Static decoration baked into a single Graphics: a tiny "neuron dust" dot in
-   * each build cell + corner accents on a subset, plus pulsing synapse rings on
-   * ~6% of cells. Brings the empty boardroom to life without dragging FPS.
+   * 静态装饰集中画进一个 Graphics：每个可建造格有微小“神经尘”，少量格子有脉冲突触环。
+   * 这样能让棋盘有潜意识组织感，同时不拖慢 FPS。
    */
   private drawDecoration(): void {
     const g = this.decorationGfx;
     g.clear();
 
-    // Tiny center dot per build cell — neuron dust. The grid itself now has
-    // bright corner brackets so we skip the redundant corner accents and rely
-    // on synapse rings + floating fragments for life.
+    // 每个可建造格中心点一点神经尘；角标由格子本身承担，避免视觉重复。
     g.fillStyle(0x6d5fb0, 0.55);
     for (const c of this.buildCells) {
       const p = this.grid.cellCenter(c.col, c.row);
       g.fillCircle(p.x, p.y, 1.4);
     }
 
-    // Pulsing synapse rings on a sparse subset
+    // 只给少量格子加脉冲突触环，保持画面活性但不扰乱读图。
     for (const ring of this.synapses) ring.destroy();
     this.synapses = [];
     const shuffled = [...this.buildCells].sort(() => Math.random() - 0.5);
@@ -613,9 +681,8 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /**
-   * Periodically materializes a faint glyph in a random build cell that drifts
-   * upward and fades — visually connects the empty space to the "subconscious
-   * tissue" theme without distracting the player.
+   * 定时在随机可建造格生成淡色符号并向上消散。
+   * 这是主题氛围层，不参与玩法，也不会阻挡玩家读路线。
    */
   private startFloatingFragments(): void {
     if (this.fragmentTimer) this.fragmentTimer.remove(false);
@@ -648,43 +715,51 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private drawSpawnAndCore(): void {
-    const sp = this.grid.cellCenter(this.spawnPos.col, this.spawnPos.row);
     const cp = this.grid.cellCenter(this.corePos.col, this.corePos.row);
     const hasSpawnArt = this.textures.exists('art-entry-portal');
     const hasCoreArt = this.textures.exists('art-self-core');
 
-    if (hasSpawnArt) {
-      const portal = this.add.image(sp.x, sp.y, 'art-entry-portal')
-        .setOrigin(0.5)
-        .setDisplaySize(42, 42)
-        .setDepth(7);
-      const baseScaleX = portal.scaleX;
-      const baseScaleY = portal.scaleY;
-      this.tweens.add({
-        targets: portal,
-        scaleX: { from: baseScaleX, to: baseScaleX * 1.05 },
-        scaleY: { from: baseScaleY, to: baseScaleY * 1.05 },
-        alpha: { from: 0.98, to: 1 },
-        duration: 1400,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut',
-      });
-    } else {
-      this.add.rectangle(sp.x, sp.y, TILE - 4, TILE - 4, 0x3a1d2c, 0.92)
-        .setStrokeStyle(1.5, 0xf472b6, 0.85).setDepth(5);
-      this.add.circle(sp.x, sp.y, 9, 0xf472b6, 0.85).setDepth(6);
-      this.add.circle(sp.x, sp.y, 4, 0xfdf2f8, 0.95).setDepth(7);
-      const spawnRing = this.add.circle(sp.x, sp.y, 22, 0xf472b6, 0)
-        .setStrokeStyle(2, 0xf472b6, 0.85).setDepth(6);
-      spawnRing.setScale(0.6);
-      this.tweens.add({
-        targets: spawnRing, scale: 1.4, alpha: { from: 0.85, to: 0 },
-        duration: 1300, repeat: -1, ease: 'Cubic.easeOut',
-      });
+    const spawnCells = Array.from(
+      new Map(
+        Object.values(this.spawnPositions ?? { short: this.spawnPos, long: this.spawnPos, edge: this.spawnPos })
+          .map((cell) => [this.keyOfCell(cell), cell]),
+      ).values(),
+    );
+    for (const spawnCell of spawnCells) {
+      const sp = this.grid.cellCenter(spawnCell.col, spawnCell.row);
+      if (hasSpawnArt) {
+        const portal = this.add.image(sp.x, sp.y, 'art-entry-portal')
+          .setOrigin(0.5)
+          .setDisplaySize(42, 42)
+          .setDepth(7);
+        const baseScaleX = portal.scaleX;
+        const baseScaleY = portal.scaleY;
+        this.tweens.add({
+          targets: portal,
+          scaleX: { from: baseScaleX, to: baseScaleX * 1.05 },
+          scaleY: { from: baseScaleY, to: baseScaleY * 1.05 },
+          alpha: { from: 0.98, to: 1 },
+          duration: 1400,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      } else {
+        this.add.rectangle(sp.x, sp.y, TILE - 4, TILE - 4, 0x3a1d2c, 0.92)
+          .setStrokeStyle(1.5, 0xf472b6, 0.85).setDepth(5);
+        this.add.circle(sp.x, sp.y, 9, 0xf472b6, 0.85).setDepth(6);
+        this.add.circle(sp.x, sp.y, 4, 0xfdf2f8, 0.95).setDepth(7);
+        const spawnRing = this.add.circle(sp.x, sp.y, 22, 0xf472b6, 0)
+          .setStrokeStyle(2, 0xf472b6, 0.85).setDepth(6);
+        spawnRing.setScale(0.6);
+        this.tweens.add({
+          targets: spawnRing, scale: 1.4, alpha: { from: 0.85, to: 0 },
+          duration: 1300, repeat: -1, ease: 'Cubic.easeOut',
+        });
+      }
+      this.add.text(sp.x, sp.y - 27, '入侵点', { fontSize: '11px', color: '#f472b6' })
+        .setOrigin(0.5).setDepth(8).setShadow(0, 0, '#0b0a18', 4);
     }
-    this.add.text(sp.x, sp.y - 27, '入侵点', { fontSize: '11px', color: '#f472b6' })
-      .setOrigin(0.5).setDepth(8).setShadow(0, 0, '#0b0a18', 4);
 
     if (hasCoreArt) {
       const core = this.add.image(cp.x, cp.y, 'art-self-core')
@@ -727,23 +802,27 @@ export class BattleScene extends Phaser.Scene {
 
   private buildHUD(): void {
     const w = this.scale.width;
-    // HUD background bar — set to a high depth so nothing in the playfield can cover it.
+    // HUD 背景放在高 depth，避免被战场对象遮挡。
     const hudBg = this.add.rectangle(w / 2, 30, w, 60, 0x0b0a18, 0.92)
       .setStrokeStyle(1, 0x2a2548).setDepth(80);
 
     const HUD_DEPTH = 81;
 
-    this.waveText = this.add.text(20, 12, '', {
+    this.hudLeftBg = this.add.rectangle(14, 8, 292, 48, 0x120f24, 0.94)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, 0x4c3a7c, 0.62)
+      .setDepth(HUD_DEPTH - 0.5);
+    this.waveText = this.add.text(28, 11, '', {
       fontSize: '14px', color: '#a78bfa',
-    }).setLetterSpacing(2).setDepth(HUD_DEPTH);
-    this.mindText = this.add.text(20, 32, '', {
+    }).setLetterSpacing(1).setDepth(HUD_DEPTH);
+    this.mindText = this.add.text(28, 34, '', {
       fontSize: '14px', color: '#fde68a',
     }).setDepth(HUD_DEPTH);
-    this.hudText = this.add.text(180, 22, '', {
+    this.hudText = this.add.text(340, 22, '', {
       fontSize: '13px', color: '#a39bc7',
     }).setDepth(HUD_DEPTH);
 
-    // Right-side icon cluster goes FIRST (so we know its left edge), then SAN bar fits left of them.
+    // 先布局右侧图标组，再根据左边缘安放理智条，避免不同宽度屏幕上重叠。
     const iconRight = w - 28;
     const iconStep = 42;
     this.menuBtn = this.makeIconButton(iconRight, 30, '✕', () => {
@@ -756,8 +835,8 @@ export class BattleScene extends Phaser.Scene {
       showHelp(() => {});
     }).setDepth(HUD_DEPTH);
 
-    // SAN bar lives LEFT of the icon cluster with comfortable spacing.
-    const iconLeftEdge = iconRight - iconStep * 2 - 18;     // x of leftmost icon's left edge
+    // 理智条位于图标组左侧，并保留固定间距。
+    const iconLeftEdge = iconRight - iconStep * 2 - 18;     // 最左侧图标的左边缘 x。
     const sanBarWidth = 200;
     const sanBarX = iconLeftEdge - sanBarWidth - 12;
     const sanBarY = 22;
@@ -788,8 +867,7 @@ export class BattleScene extends Phaser.Scene {
 
   private makeIconButton(x: number, y: number, glyph: string, onClick: () => void): Phaser.GameObjects.Container {
     const c = this.add.container(x, y);
-    // Larger visual disc (r=16) so the target reads as a real button, plus an
-    // even larger invisible hit-circle (r=18) for some forgiveness on the edges.
+    // 可见圆盘让它读起来像按钮；更大的隐形点击区提升边缘点击容错。
     const bg = this.add.circle(0, 0, 16, 0xa78bfa, 0.12).setStrokeStyle(1.2, 0xa78bfa, 0.5);
     const t = this.add.text(0, 0, glyph, { fontSize: '15px', color: '#f5f3ff' }).setOrigin(0.5);
     const hit = this.add.zone(0, 0, 42, 42).setOrigin(0.5);
@@ -831,8 +909,7 @@ export class BattleScene extends Phaser.Scene {
       const hit = this.add.zone(0, 0, towerButtonW + 12, 72).setOrigin(0.5);
       btn.add([bg, icon, name, cost, hit]);
       btn.setSize(towerButtonW, 56);
-      // A real Zone child catches clicks instead of relying on Container
-      // hitArea math; this fixes missed clicks on rectangle corners.
+      // 使用真实 Zone 子对象接点击，避免 Container hitArea 在矩形边角漏判。
       hit.setInteractive({ useHandCursor: true });
       hit.on('pointerover', () => {
         if (this.selectedTowerKind !== k) bg.setFillStyle(0xa78bfa, 0.18);
@@ -855,7 +932,7 @@ export class BattleScene extends Phaser.Scene {
       bx += towerButtonStep;
     }
 
-    // Player-controlled build-cell expansion.
+    // 玩家手动扩展可建造格。
     const sxSculpt = w - 505;
     this.sculptBtn = this.add.container(sxSculpt, barY);
     const scBg = this.add.rectangle(0, 0, 130, 50, 0x9fe870, 0.10).setStrokeStyle(1, 0x9fe870, 0.55);
@@ -877,7 +954,7 @@ export class BattleScene extends Phaser.Scene {
     scHit.on('pointerdown', () => this.toggleSculptMode());
     this.refreshSculptButton();
 
-    // Speed toggle button
+    // 倍速切换按钮。
     const sxSpeed = w - 350;
     this.speedBtn = this.add.container(sxSpeed, barY);
     const spBg = this.add.rectangle(0, 0, 110, 50, 0x67e8f9, 0.10).setStrokeStyle(1, 0x67e8f9, 0.55);
@@ -898,7 +975,7 @@ export class BattleScene extends Phaser.Scene {
     });
     spHit.on('pointerdown', () => this.cycleSpeed());
 
-    // Start wave button
+    // 开始波次按钮。
     const sx = w - 180;
     this.startWaveBtn = this.add.container(sx, barY);
     const sbg = this.add.rectangle(0, 0, 160, 50, 0x34d399, 0.18).setStrokeStyle(1, 0x34d399, 0.7);
@@ -1024,30 +1101,74 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private buildMessageBanner(): void {
-    this.msgText = this.add.text(this.scale.width / 2, 96, '', {
+    this.msgBg = this.add.rectangle(Math.round(this.scale.width / 2), 96, 420, 36, 0x0b0a18, 0.97)
+      .setStrokeStyle(1, 0x4c3a7c, 0.7)
+      .setDepth(39)
+      .setAlpha(0);
+    this.msgText = this.add.text(Math.round(this.scale.width / 2), 96, '', {
       fontSize: '16px',
-      color: '#fde68a',
-    }).setOrigin(0.5).setDepth(40).setAlpha(0);
+      color: '#c4b5fd',
+      stroke: '#080615',
+      strokeThickness: 4,
+      resolution: 2,
+      align: 'center',
+    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setDepth(40).setAlpha(0);
   }
 
   private flashMessage(text: string, color = '#fde68a', durationMs = 1800): void {
-    this.msgText.setText(text);
-    this.msgText.setColor(color);
+    this.setMessageBannerText(text, color);
     this.msgText.setAlpha(0);
-    this.tweens.killTweensOf(this.msgText);
+    this.msgBg.setAlpha(0);
+    this.tweens.killTweensOf([this.msgText, this.msgBg]);
     this.tweens.add({
-      targets: this.msgText,
+      targets: [this.msgText, this.msgBg],
       alpha: 1,
       duration: 220,
       onComplete: () => {
         this.tweens.add({
-          targets: this.msgText,
+          targets: [this.msgText, this.msgBg],
           alpha: 0,
           delay: durationMs,
           duration: 600,
+          onComplete: () => this.restorePersistentBuildMessage(),
         });
       },
     });
+  }
+
+  private showPersistentBuildMessage(text: string, color = '#a78bfa'): void {
+    this.persistentBuildMessage = { text, color };
+    this.tweens.killTweensOf([this.msgText, this.msgBg]);
+    this.setMessageBannerText(text, color);
+    this.msgBg.setAlpha(1);
+    this.msgText.setAlpha(1);
+  }
+
+  private clearPersistentBuildMessage(): void {
+    this.persistentBuildMessage = null;
+    this.tweens.killTweensOf([this.msgText, this.msgBg]);
+    this.msgBg.setAlpha(0);
+    this.msgText.setAlpha(0);
+  }
+
+  private restorePersistentBuildMessage(): void {
+    if (this.phase !== 'build' || !this.persistentBuildMessage) return;
+    this.setMessageBannerText(this.persistentBuildMessage.text, this.persistentBuildMessage.color);
+    this.msgBg.setAlpha(1);
+    this.msgText.setAlpha(1);
+  }
+
+  private setMessageBannerText(text: string, color: string): void {
+    const maxTextWidth = Math.max(360, Math.min(this.scale.width - 160, 1040));
+    this.msgText.setWordWrapWidth(maxTextWidth, true);
+    this.msgText.setText(text);
+    this.msgText.setColor(color);
+    this.msgText.setPosition(Math.round(this.scale.width / 2), 96);
+
+    const bgWidth = Math.min(this.scale.width - 80, Math.max(420, this.msgText.displayWidth + 44));
+    const bgHeight = Math.max(36, this.msgText.displayHeight + 14);
+    this.msgBg.setPosition(Math.round(this.scale.width / 2), 96);
+    this.msgBg.setSize(bgWidth, bgHeight);
   }
 
   private buildTutorialPanel(): void {
@@ -1079,32 +1200,143 @@ export class BattleScene extends Phaser.Scene {
       fontSize: '10px',
       color: '#fde68a',
     }).setOrigin(0.5).setDepth(84).setVisible(false);
+    this.tutorialToggleBg = this.add.rectangle(0, 0, 28, 24, 0x18253a, 0.92)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, 0x67e8f9, 0.55)
+      .setDepth(85)
+      .setVisible(false);
+    this.tutorialToggleText = this.add.text(0, 0, '−', {
+      fontSize: '12px',
+      color: '#67e8f9',
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(86).setVisible(false);
+    this.tutorialToggleHit = this.add.zone(0, 0, 28, 24)
+      .setOrigin(0, 0)
+      .setDepth(87)
+      .setVisible(false);
+    this.tutorialToggleHit.setInteractive({ useHandCursor: true });
+    this.tutorialToggleHit.on('pointerdown', () => {
+      this.tutorialCollapsed = !this.tutorialCollapsed;
+      this.updateTutorialPanel();
+    });
   }
 
   private updateTutorialPanel(): void {
     if (!this.tutorialBg) return;
-    const tip = this.phase === 'build' ? getTutorialTip(this.currentWaveIdx + 1) : null;
+    const tip = (this.phase === 'build' || this.phase === 'combat')
+      ? getTutorialTip(this.currentWaveIdx + 1, this.currentLevel.id)
+      : null;
     const visible = !!tip;
-    this.tutorialBg.setVisible(visible);
-    this.tutorialTitle.setVisible(visible);
-    this.tutorialBody.setVisible(visible);
+    if (!visible) {
+      this.tutorialBg.setVisible(false);
+      this.tutorialTitle.setVisible(false);
+      this.tutorialBody.setVisible(false);
+      this.tutorialIcon.setVisible(false);
+      this.tutorialIconLabel.setVisible(false);
+      this.setTutorialToggleVisible(false);
+      return;
+    }
+
+    if (this.tutorialCollapsed) {
+      this.tutorialBg.setVisible(false);
+      this.tutorialTitle.setVisible(false);
+      this.tutorialBody.setVisible(false);
+      this.tutorialIcon.setVisible(false);
+      this.tutorialIconLabel.setVisible(false);
+      this.layoutTutorialToggle(20, 78, 112, 30, '教学提示');
+      return;
+    }
+
+    this.tutorialBg.setVisible(true);
+    this.tutorialTitle.setVisible(true);
+    this.tutorialBody.setVisible(true);
     this.tutorialIcon.setVisible(false);
     this.tutorialIconLabel.setVisible(false);
-    if (!tip) return;
 
-    const showCacheIcon = this.currentWaveIdx === 0;
+    const showCacheIcon = this.currentLevel.id === DEFAULT_LEVEL_ID && this.currentWaveIdx === 0;
     this.tutorialBody.setWordWrapWidth(showCacheIcon ? 302 : 398, true);
     this.tutorialTitle.setText(tip.title);
-    this.tutorialBody.setText(tip.body);
+    this.tutorialBody.setText(this.currentTutorialBody(tip));
     this.tutorialIcon.setVisible(showCacheIcon);
     this.tutorialIconLabel.setVisible(showCacheIcon);
     const targetHeight = Math.max(116, 52 + this.tutorialBody.height);
     this.tutorialBg.setSize(this.tutorialBg.width, targetHeight);
+    this.layoutTutorialToggle(20 + this.tutorialBg.width - 38, 88, 26, 24, '−');
+  }
+
+  private setTutorialToggleVisible(visible: boolean): void {
+    this.tutorialToggleBg.setVisible(visible);
+    this.tutorialToggleText.setVisible(visible);
+    this.tutorialToggleHit.setVisible(visible);
+  }
+
+  private layoutTutorialToggle(x: number, y: number, w: number, h: number, label: string): void {
+    this.tutorialToggleBg
+      .setPosition(x, y)
+      .setSize(w, h)
+      .setVisible(true);
+    this.tutorialToggleText
+      .setPosition(x + w / 2, y + h / 2)
+      .setText(label)
+      .setVisible(true);
+    this.tutorialToggleHit
+      .setPosition(x, y)
+      .setSize(w, h)
+      .setVisible(true);
+  }
+
+  private currentTutorialBody(tip: TutorialTip): string {
+    if (this.currentLevel.id === DEFAULT_LEVEL_ID) return tip.body;
+    const wave = this.waves[this.currentWaveIdx];
+    if (!wave) return tip.body;
+
+    return [
+      tip.body,
+      this.currentRouteHint(wave),
+      tip.routeNote,
+    ].filter(Boolean).join('\n');
+  }
+
+  private currentRouteHint(wave: WaveSpec): string {
+    const activeRoute = this.computeActivePathKey(wave);
+    const openRoutes = this.openRoutesForWave(wave, activeRoute);
+    const pressure = this.routePressureHint(wave);
+    const openText = openRoutes.map(routeVariantLabel).join(' / ');
+    return `当前开放：${openText}；主压力：${pressure}。`;
+  }
+
+  private routePressureHint(wave: WaveSpec): string {
+    const counts: Record<RouteVariant, number> = { short: 0, long: 0, edge: 0 };
+    let randomCount = 0;
+    for (const spawn of wave.spawns) {
+      if (spawn.pathBias === 'random') {
+        randomCount++;
+        continue;
+      }
+      counts[resolveRouteVariant(spawn.pathBias, wave.index)]++;
+    }
+
+    const routeEntries = EXPORT_ROUTES
+      .filter((route) => counts[route] > 0)
+      .sort((a, b) => counts[b] - counts[a])
+      .map((route) => `${routeVariantLabel(route)}×${counts[route]}`);
+    if (randomCount > 0) routeEntries.push(`随机分路×${randomCount}`);
+    return routeEntries.join(' / ') || routeVariantLabel(this.computeActivePathKey(wave));
   }
 
   private updateHUD(): void {
-    this.waveText.setText(`第 ${this.currentWaveIdx + 1} / ${TOTAL_WAVES} 波`);
+    const waveNo = this.currentWaveIdx + 1;
+    const titleCandidates = [
+      `${this.currentLevel.name} · 第 ${waveNo}/${TOTAL_WAVES} 波`,
+      `${this.currentLevel.name} · ${waveNo}/${TOTAL_WAVES}`,
+      `第 ${waveNo}/${TOTAL_WAVES} 波`,
+    ];
+    for (const title of titleCandidates) {
+      this.waveText.setText(title);
+      if (this.waveText.displayWidth <= 390 || title === titleCandidates[titleCandidates.length - 1]) break;
+    }
     this.mindText.setText(`念力 ${this.mind}`);
+    this.layoutHudLeftPanel();
     const ratio = Math.max(0, this.sanity / this.sanityMax);
     this.sanityBar.width = 198 * ratio;
     if (ratio > 0.5) this.sanityBar.fillColor = 0x34d399;
@@ -1120,11 +1352,35 @@ export class BattleScene extends Phaser.Scene {
       gameover: '失败',
       victory: '胜利',
     };
-    this.hudText.setText(`${phaseLabel[this.phase]}  ·  存活心魔 ${this.enemies.filter(e => e.alive).length}`);
+    this.layoutHudStatus(phaseLabel[this.phase], this.enemies.filter(e => e.alive).length);
     this.updateTutorialPanel();
   }
 
-  // ===================== Phase: intro / vignette =====================
+  private layoutHudLeftPanel(): void {
+    const width = Math.min(430, Math.max(220, this.waveText.displayWidth + 28, this.mindText.displayWidth + 28));
+    this.hudLeftBg.setSize(width, 50);
+  }
+
+  private layoutHudStatus(phaseText: string, aliveCount: number): void {
+    const gap = 28;
+    const waveRight = this.hudLeftBg.x + this.hudLeftBg.displayWidth;
+    const statusX = Math.max(340, waveRight + gap);
+    const sanityLeft = this.sanityBarBg.x - 72;
+    const maxWidth = Math.max(96, sanityLeft - statusX);
+    const candidates = [
+      `${phaseText}  ·  存活心魔 ${aliveCount}`,
+      `${phaseText} · 心魔 ${aliveCount}`,
+      `${phaseText} · ${aliveCount}`,
+    ];
+
+    this.hudText.setPosition(statusX, 22);
+    for (const text of candidates) {
+      this.hudText.setText(text);
+      if (this.hudText.displayWidth <= maxWidth || text === candidates[candidates.length - 1]) break;
+    }
+  }
+
+  // ===================== 阶段：开场剧情 =====================
 
   private async openVignetteForCurrentWave(): Promise<void> {
     this.phase = 'intro';
@@ -1132,8 +1388,10 @@ export class BattleScene extends Phaser.Scene {
     const settings = loadSettings();
     const v = await runDirector({
       settings,
-      night: this.currentWaveIdx + 1,
-      emotionHint: fallbackVignette(this.currentWaveIdx + 1).emotion,
+      wave: this.currentWaveIdx + 1,
+      emotionHint: fallbackVignette(this.currentWaveIdx + 1, this.currentLevel.id).emotion,
+      levelId: this.currentLevel.id,
+      levelName: this.currentLevel.name,
     });
     showVignette(v, () => this.enterBuildPhase());
   }
@@ -1141,30 +1399,31 @@ export class BattleScene extends Phaser.Scene {
   private enterBuildPhase(): void {
     this.phase = 'build';
     const wave = this.waves[this.currentWaveIdx];
-    this.mind += wave.mindGift;
+    this.mind += Math.round(wave.mindGift * this.currentLevel.mindGiftMul);
     this.reprojectMapForWave(wave, this.currentWaveIdx > 0);
     this.refreshSculptButton();
     const routeLabel = this.routeLabelFromKey(this.activePathKey);
-    this.flashMessage(`第 ${this.currentWaveIdx + 1} 波 · 布防阶段  ·  ${routeLabel}（[空格] 开始）`, '#a78bfa', 2600);
+    this.showPersistentBuildMessage(`${this.currentLevel.name} · 第 ${this.currentWaveIdx + 1} 波 · ${routeLabel}（[空格] 开始）`, '#a78bfa');
     this.updateHUD();
   }
 
   private routeLabelFromKey(key: RouteKey): string {
     const routes = this.mapProjection.activeRoutes.map(routeVariantLabel).join(' / ');
-    return `地图：${routeVariantLabel(key)}方案 · 开放 ${routes}`;
+    return `地图：${routeVariantLabel(key)} · 开放：${routes}`;
   }
 
-  // ===================== Phase: combat =====================
+  // ===================== 阶段：战斗 =====================
 
   private async startWave(): Promise<void> {
     if (this.phase !== 'build') return;
+    this.clearPersistentBuildMessage();
     this.sculptMode = false;
     this.refreshToolbar();
     this.refreshSculptButton();
 
     const wave = this.waves[this.currentWaveIdx];
     if (wave.isBoss) {
-      const persona = BOSS_PERSONAS[wave.index];
+      const persona = getBossPersona(this.currentLevel.id, wave.index);
       if (persona) {
         this.bossNegotiationApplied = await this.runBossNegotiation(wave.index, persona);
       } else {
@@ -1179,21 +1438,23 @@ export class BattleScene extends Phaser.Scene {
     this.currentWaveStats = this.createWaveStatsDraft(this.currentWaveIdx + 1);
     this.nextBossCoreTickAt = this.gameTime + getBossCombatConfig().coreTickIntervalMs;
     this.nextBossSummonAt = 0;
-    // Schedule spawns in gameTime space; gameTime starts at 0 each scene and just keeps growing.
+    this.mirrorEchoQueue = [];
+    this.mirrorEchoTriggers = new WeakMap();
+    // 刷怪时间写入 gameTime 坐标；gameTime 不随波次清零，方便统一倍速和冷却。
     this.spawnQueue = wave.spawns.map(s => ({
       spawnAt: this.gameTime + s.delayMs,
       spec: s,
       isBossSpawn: s.hpMul >= 5,
     }));
     this.spawnQueue.sort((a, b) => a.spawnAt - b.spawnAt);
-    this.flashMessage(`第 ${this.currentWaveIdx + 1} 波  ·  心魔降临`, '#f472b6', 2400);
+    this.flashMessage(`${this.currentLevel.name} · 第 ${this.currentWaveIdx + 1} 波  ·  心魔降临`, '#f472b6', 2400);
     Sound.play('wave_start');
     this.updateHUD();
   }
 
   private async runBossNegotiation(waveIndex: number, persona: import('../../types').BossPersona): Promise<NegotiationResolution> {
     return new Promise((resolve) => {
-      const totalTurns = totalDialogueTurns(waveIndex);
+      const totalTurns = totalDialogueTurns(this.currentLevel.id, waveIndex);
       let turnIdx = 0;
       let lastTag: ChoiceTag | null = null;
       let resolution: NegotiationResolution = { ...NEUTRAL_RESOLUTION };
@@ -1208,7 +1469,7 @@ export class BattleScene extends Phaser.Scene {
           persona,
           lastPlayerTag: lastTag,
           turnIndex: turnIdx,
-        }, waveIndex);
+        }, waveIndex, this.currentLevel.id);
         await handle.showTurn(turn, (choice) => {
           lastTag = choice.tag;
           resolution = applyChoiceTag(resolution, choice.tag);
@@ -1230,10 +1491,24 @@ export class BattleScene extends Phaser.Scene {
       const s = this.spawnQueue.shift()!;
       this.spawnEnemyFromSpec(s.spec, s.isBossSpawn);
     }
+    while (this.mirrorEchoQueue.length && this.mirrorEchoQueue[0].spawnAt <= this.gameTime) {
+      const echo = this.mirrorEchoQueue.shift()!;
+      const openGateCount = this.mapElements.filter((element) => (
+        element.kind === 'mirror_gate' && element.alive && element.spec.pairId === echo.pairId
+      )).length;
+      if (openGateCount < 2) continue;
+      this.spawnEnemyFromSpec(echo.spec, false, echo.route, echo.progressRatio, 0.4);
+    }
   }
 
-  private spawnEnemyFromSpec(spec: EnemySpawnSpec, isBoss: boolean): Enemy {
-    const route = pickRouteForEnemy(spec, this.mapProjection.activeRoutes, this.currentWaveIdx + 1);
+  private spawnEnemyFromSpec(
+    spec: EnemySpawnSpec,
+    isBoss: boolean,
+    forcedRoute?: RouteVariant,
+    progressRatio = 0,
+    bountyMul = 1,
+  ): Enemy {
+    const route = forcedRoute ?? pickRouteForEnemy(spec, this.mapProjection.activeRoutes, this.currentWaveIdx + 1);
     const path = this.pathPool[route];
     this.recordRoutePick(route);
     const scale = this.computeWaveScale(this.currentWaveIdx, isBoss);
@@ -1249,8 +1524,13 @@ export class BattleScene extends Phaser.Scene {
       waveHpMul: scale.hp,
       waveSpeedMul: scale.spd,
       waveDamageMul: scale.dmg,
-      waveBountyMul: scale.bounty,
+      waveBountyMul: scale.bounty * bountyMul,
     });
+    if (progressRatio > 0) {
+      enemy.progressDist = Math.min(enemy.pathLen - 1, Math.max(0, enemy.pathLen * progressRatio));
+      enemy.segIdx = 0;
+      enemy.update(this.gameTime, 0);
+    }
     this.enemies.push(enemy);
     if (isBoss) this.onBossSpawned(enemy);
     return enemy;
@@ -1325,6 +1605,16 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private currentBossSkillKind(): BossSkillKind | null {
+    const boss = this.activeBoss();
+    if (boss) {
+      return ({
+        anxiety: 'anxiety_core',
+        depression: 'depression_core',
+        obsession: 'obsession_core',
+        guilt: 'guilt_core',
+        ptsd: 'ptsd_core',
+      } as const)[boss.def.kind];
+    }
     const waveIndex = this.currentWaveIdx + 1;
     return getBossCombatConfig().waveSkills[waveIndex] ?? null;
   }
@@ -1386,9 +1676,10 @@ export class BattleScene extends Phaser.Scene {
     const bossCfg = getBossCombatConfig();
     const skillCfg = bossCfg.skills[skill];
     const summonSeconds = Math.round(bossCfg.summonIntervalMs / 1000);
+    const minionName = ENEMY_DEFS[skillCfg.minion.kind].displayName;
     const text = skill === 'anxiety_core'
-      ? `BOSS 技能：全场心魔 x${skillCfg.auraSpeedMul.toFixed(2)} 移速${enraged ? ` · 狂暴：攻击 x${skillCfg.enragedDamageMul.toFixed(2)}` : ''} · 每 ${summonSeconds} 秒召唤 ${skillCfg.displayName}`
-      : `BOSS 技能：全场心魔 +${Math.round(skillCfg.shieldMaxHpRatio * 100)}% 最大生命护盾${enraged ? ` · 狂暴：受伤 x${skillCfg.enragedDamageTakenMul.toFixed(2)}` : ''} · 每 ${summonSeconds} 秒召唤 ${skillCfg.displayName}`;
+      ? `BOSS 技能：${skillCfg.displayName} · 全场心魔 x${skillCfg.auraSpeedMul.toFixed(2)} 移速${enraged ? ` · 狂暴：攻击 x${skillCfg.enragedDamageMul.toFixed(2)}` : ''} · 每 ${summonSeconds} 秒召唤 ${minionName}`
+      : `BOSS 技能：${skillCfg.displayName} · 全场心魔 +${Math.round(skillCfg.shieldMaxHpRatio * 100)}% 最大生命护盾${enraged ? ` · 狂暴：受伤 x${skillCfg.enragedDamageTakenMul.toFixed(2)}` : ''} · 每 ${summonSeconds} 秒召唤 ${minionName}`;
     this.bossSkillText.setText(text);
     this.bossSkillText.setColor(enraged ? '#fecdd3' : '#fde68a');
     this.bossSkillBg.setStrokeStyle(1.5, enraged ? 0xfb7185 : 0xfde68a, 0.85);
@@ -1439,11 +1730,9 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /**
-   * Per-wave escalation multipliers. Wave 1 sits at the design baseline (1.0)
-   * and each subsequent wave compounds threat — HP and damage rise the most so
-   * the player must keep upgrading and rebuilding, while speed grows gently to
-   * stay readable. Bosses get an extra layer of muscle on top because every
-   * boss is also the gatekeeper of a story beat.
+   * 每波成长倍率。第 1 波是设计基线，之后逐波提高威胁。
+   * 生命和伤害涨幅更明显，迫使玩家升级/改建；速度只小幅增长，避免读图失控。
+   * Boss 额外加成，因为每个 Boss 都承担一个剧情关口。
    */
   private computeWaveScale(waveIdx: number, isBoss: boolean): {
     hp: number; spd: number; dmg: number; bounty: number;
@@ -1455,18 +1744,20 @@ export class BattleScene extends Phaser.Scene {
     let spd    = 1 + cfg.speedPerWave * i + cfg.speedLatePerWave * late;
     let dmg    = 1 + cfg.damagePerWave * i + cfg.damageLatePerWave * late;
     const bounty = 1 + cfg.bountyPerWave * i;
+    hp *= this.currentLevel.globalHpMul;
+    spd *= this.currentLevel.globalSpeedMul;
     if (isBoss) {
       hp  *= cfg.bossHpMul;
       dmg *= cfg.bossDamageMul;
-      // speed unchanged for bosses — keep the pacing.
+      // Boss 不提高速度，保持首领战节奏可读。
     }
     return { hp, spd, dmg, bounty };
   }
 
-  // ===================== Frame update =====================
+  // ===================== 帧更新 =====================
 
   update(_realTime: number, deltaMs: number): void {
-    // Cap deltaMs to avoid huge jumps after tab refocus then scale by speedMul.
+    // 限制 deltaMs，避免浏览器标签页恢复后一次性跳太远，再乘以倍速。
     const cappedDelta = Math.min(deltaMs, 80);
     const gd = cappedDelta * this.speedMul;
     this.gameTime += gd;
@@ -1474,7 +1765,10 @@ export class BattleScene extends Phaser.Scene {
     if (this.phase === 'combat') {
       this.spawnNext();
       this.processBossSkills();
+      this.processMapElementMovementAuras();
       for (const e of this.enemies) e.update(this.gameTime, gd);
+      this.processMirrorGates();
+      this.processTrialObelisks();
       this.processBoundaryBlocks(gd);
       this.processBossCoreAttacks();
       if (this.phase !== 'combat') {
@@ -1482,11 +1776,12 @@ export class BattleScene extends Phaser.Scene {
         return;
       }
       this.processArrivals();
-      for (const t of this.towers) t.update(this.gameTime, this.enemies, this.mindCaches, (tower) => this.depressionDebuffFor(tower));
+      for (const t of this.towers) t.update(this.gameTime, this.enemies, this.mindCaches, this.mapElements, (tower) => this.depressionDebuffFor(tower));
       this.processMindCaches();
+      this.processMapElements();
       this.processAcceptance(gd);
       this.processHallucination(this.gameTime);
-      if (this.spawnQueue.length === 0 && this.enemies.length === 0) {
+      if (this.spawnQueue.length === 0 && this.mirrorEchoQueue.length === 0 && this.enemies.length === 0) {
         this.endWave();
       }
     }
@@ -1604,7 +1899,7 @@ export class BattleScene extends Phaser.Scene {
     return max;
   }
 
-  // ===================== End of wave / Review / Game over =====================
+  // ===================== 波次结束 / 复盘 / 终局 =====================
 
   private async endWave(): Promise<void> {
     if (this.phase !== 'combat') return;
@@ -1636,7 +1931,11 @@ export class BattleScene extends Phaser.Scene {
     });
 
     const settings = loadSettings();
-    const result: ReviewResult = await runReviewAgent({ settings, summary });
+    const result: ReviewResult = await runReviewAgent({
+      settings,
+      summary,
+      allUnlocked: this.levelHasAllUnlocks(),
+    });
 
     let changes: string[] = [];
     let nextWaveBefore: AgentProofSnapshot['nextWaveBefore'] = null;
@@ -1645,16 +1944,20 @@ export class BattleScene extends Phaser.Scene {
     if (this.currentWaveIdx + 1 < this.waves.length) {
       const nextWave = this.waves[this.currentWaveIdx + 1];
       nextWaveBefore = summarizeWaveForProof(nextWave);
-      const apply = applyStrategy(nextWave, result.next_strategy);
+      const apply = applyStrategy(nextWave, result.next_strategy, { allUnlocked: this.levelHasAllUnlocks() });
       this.waves[this.currentWaveIdx + 1] = apply.applied;
       this.waveMapAggression.set(this.currentWaveIdx + 1, result.next_strategy.aggression);
       const afterRoute = this.computeActivePathKey(apply.applied);
+      const forceOpenRoutes = this.openRoutesForWave(apply.applied, afterRoute);
       const afterMap = createMapProjection(this.grid.cfg, {
         activeRoute: afterRoute,
         waveIndex: apply.applied.index,
         aggression: result.next_strategy.aggression,
+        forceOpenRoutes,
         occupiedCells: this.occupiedTowerCells(),
         extraBuildCells: this.playerBuildCells,
+        levelId: this.currentLevel.id,
+        disabledMapElementIds: Array.from(this.destroyedMapElementIds),
       });
       mapChange = {
         before: this.mapProjection.summary,
@@ -1702,6 +2005,211 @@ export class BattleScene extends Phaser.Scene {
     }, 220);
   }
 
+  private syncMapElementsForWave(): void {
+    for (const element of this.mapElements) element.removeSilently();
+    this.mapElements = this.mapProjection.mapElements.map((spec) => (
+      new MapElementActor(this, { spec, grid: this.grid })
+    ));
+  }
+
+  private activeMapElements(kind: MapElementActor['kind']): MapElementActor[] {
+    return this.mapElements.filter((element) => element.alive && element.kind === kind);
+  }
+
+  private processMapElementMovementAuras(): void {
+    this.processBreathVents();
+    this.processFractureNodes();
+  }
+
+  private processBreathVents(): void {
+    const vents = this.activeMapElements('breath_vent');
+    if (!vents.length) return;
+
+    const phase: 'inhale' | 'exhale' = Math.floor(this.gameTime / 6000) % 2 === 0 ? 'inhale' : 'exhale';
+    if (this.currentLevel.rule === 'breath_phase' && this.lastBreathPhase !== phase) {
+      this.lastBreathPhase = phase;
+      this.flashMessage(phase === 'inhale' ? '吸气错拍：心魔加速' : '呼气错拍：心魔暴露', phase === 'inhale' ? '#67e8f9' : '#fde68a', 900);
+    }
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.attackingCore) continue;
+      for (const vent of vents) {
+        if (!this.withinElementRadius(enemy.body.x, enemy.body.y, vent)) continue;
+        const effect = vent.spec.effectMul || 1.22;
+        if (phase === 'inhale') {
+          enemy.applySpeedBuff(effect, 260, this.gameTime);
+        } else {
+          enemy.bossAuraDamageTakenMul *= Math.max(1, 1 + (effect - 1) * 0.82);
+        }
+      }
+    }
+  }
+
+  private processFractureNodes(): void {
+    const nodes = this.activeMapElements('fracture_node');
+    if (!nodes.length) return;
+    for (const node of nodes) {
+      if (this.fractureSuppressedByBoundary(node)) continue;
+      for (const enemy of this.enemies) {
+        if (!enemy.alive || enemy.routeVariant !== 'edge' || enemy.attackingCore) continue;
+        if (!this.withinElementRadius(enemy.body.x, enemy.body.y, node)) continue;
+        enemy.applySpeedBuff(node.spec.effectMul || 1.3, 260, this.gameTime);
+      }
+    }
+  }
+
+  private processMirrorGates(): void {
+    const gates = this.activeMapElements('mirror_gate');
+    if (!gates.length) return;
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.spec.echoClone || enemy.attackingCore) continue;
+      for (const gate of gates) {
+        if (!this.withinElementRadius(enemy.body.x, enemy.body.y, gate)) continue;
+        const triggered = this.mirrorEchoTriggers.get(enemy) ?? new Set<string>();
+        if (triggered.has(gate.spec.id)) continue;
+        triggered.add(gate.spec.id);
+        this.mirrorEchoTriggers.set(enemy, triggered);
+
+        const pair = gates.find((item) => item !== gate && item.spec.pairId && item.spec.pairId === gate.spec.pairId);
+        if (!pair) continue;
+        const route = pair.spec.route ?? gate.spec.route ?? enemy.routeVariant;
+        const echoSpec: EnemySpawnSpec = {
+          ...enemy.spec,
+          delayMs: 0,
+          hpMul: enemy.spec.hpMul * (gate.spec.effectMul || 0.55),
+          speedMul: enemy.spec.speedMul,
+          skills: [...enemy.spec.skills],
+          echoClone: true,
+        };
+        this.mirrorEchoQueue.push({
+          spawnAt: this.gameTime + (gate.spec.cooldownMs || 5500),
+          spec: echoSpec,
+          route,
+          progressRatio: 0.32,
+          pairId: gate.spec.pairId,
+        });
+        this.mirrorEchoQueue.sort((a, b) => a.spawnAt - b.spawnAt);
+        this.flashMapElementPulse(gate, 0xa78bfa);
+      }
+    }
+  }
+
+  private processTrialObelisks(): void {
+    for (const enemy of this.enemies) enemy.mapElementTaunt = false;
+    const obelisks = this.activeMapElements('trial_obelisk');
+    if (!obelisks.length) return;
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.attackingCore) continue;
+      const elite = enemy.isBoss || enemy.spec.skills.includes('taunt') || enemy.spec.skills.includes('shield');
+      if (!elite) continue;
+      for (const obelisk of obelisks) {
+        if (!this.withinElementRadius(enemy.body.x, enemy.body.y, obelisk)) continue;
+        enemy.mapElementTaunt = true;
+        enemy.bossAuraDamageTakenMul *= obelisk.spec.effectMul || 0.75;
+        enemy.applyMapHpShield(obelisk.spec.id, 0.1);
+      }
+    }
+  }
+
+  private processMapElements(): void {
+    const survivors: MapElementActor[] = [];
+    let mapChanged = false;
+    for (const element of this.mapElements) {
+      if (element.alive) {
+        survivors.push(element);
+        continue;
+      }
+      if (element.rewarded) continue;
+      element.rewarded = true;
+      if (element.reward > 0) {
+        this.mind += element.reward;
+        this.floatMindReward(element.pos.x, element.pos.y, element.reward);
+        Sound.play('enemy_die');
+      }
+      if (element.kind === 'dry_well') {
+        this.destroyedMapElementIds.add(element.spec.id);
+        mapChanged = this.openDryWellBuildCells(element) || mapChanged;
+      }
+    }
+    this.mapElements = survivors;
+    if (mapChanged) {
+      this.drawGrid();
+      this.collectBuildCells();
+      this.drawDecoration();
+      this.drawPath(this.activePathKey);
+      this.syncMindCachesForMap();
+      this.refreshSculptButton();
+    }
+  }
+
+  private openDryWellBuildCells(element: MapElementActor): boolean {
+    const radius = Math.max(1, Math.round(element.spec.radiusCells || 1));
+    const candidates: GridPos[] = [];
+    for (let row = element.cell.row - radius; row <= element.cell.row + radius; row++) {
+      for (let col = element.cell.col - radius; col <= element.cell.col + radius; col++) {
+        const cell = { col, row };
+        if (!this.grid.inBounds(col, row)) continue;
+        if (this.grid.get(col, row) !== 'block') continue;
+        if (this.grid.getTowerId(col, row) > 0) continue;
+        if (this.mindCacheAt(cell)) continue;
+        if (this.playerBuildCells.some((item) => this.keyOfCell(item) === this.keyOfCell(cell))) continue;
+        candidates.push(cell);
+      }
+    }
+    candidates.sort((a, b) => {
+      const da = Math.abs(a.col - element.cell.col) + Math.abs(a.row - element.cell.row);
+      const db = Math.abs(b.col - element.cell.col) + Math.abs(b.row - element.cell.row);
+      return da - db;
+    });
+    const opened = candidates.slice(0, 6);
+    for (const cell of opened) {
+      this.playerBuildCells.push({ ...cell });
+      this.grid.set(cell.col, cell.row, 'build');
+      this.mapProjection.buildCells.push({ ...cell });
+    }
+    if (opened.length) {
+      this.mapProjection.summary.buildCellCount += opened.length;
+      this.mapProjection.summary.towerPocketCount += opened.length;
+      this.mapProjection.summary.blockedCellCount = Math.max(0, this.mapProjection.summary.blockedCellCount - opened.length);
+      this.flashMessage(`枯井释放塔位 +${opened.length}`, '#fde68a', 1400);
+    }
+    return opened.length > 0;
+  }
+
+  private fractureSuppressedByBoundary(node: MapElementActor): boolean {
+    const radius = node.radiusPx(TILE) + 18;
+    const r2 = radius * radius;
+    return this.towers.some((tower) => {
+      if (tower.kind !== 'boundary' || tower.hallucinated) return false;
+      const dx = tower.pos.x - node.body.x;
+      const dy = tower.pos.y - node.body.y;
+      return dx * dx + dy * dy <= r2;
+    });
+  }
+
+  private withinElementRadius(x: number, y: number, element: MapElementActor): boolean {
+    const radius = Math.max(TILE * 0.72, element.radiusPx(TILE));
+    const dx = x - element.body.x;
+    const dy = y - element.body.y;
+    return dx * dx + dy * dy <= radius * radius;
+  }
+
+  private flashMapElementPulse(element: MapElementActor, color: number): void {
+    const ring = this.add.circle(element.body.x, element.body.y, 10, color, 0)
+      .setStrokeStyle(2, color, 0.82)
+      .setDepth(34);
+    this.tweens.add({
+      targets: ring,
+      radius: Math.max(38, element.radiusPx(TILE)),
+      alpha: 0,
+      duration: 520,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   private processBoundaryBlocks(gameDelta: number): void {
     const blockers = this.towers.filter(t => t.kind === 'boundary');
     if (!blockers.length) return;
@@ -1732,7 +2240,7 @@ export class BattleScene extends Phaser.Scene {
     const survivors: MindCache[] = [];
     for (const cache of this.mindCaches) {
       if (!cache.alive) continue;
-      if (this.canHostMindCache(cache.cell)) {
+      if (this.canHostMindCache(cache.cell) && !this.isSuppressedByDryWell(cache.cell)) {
         survivors.push(cache);
       } else {
         cache.removeSilently();
@@ -1741,10 +2249,12 @@ export class BattleScene extends Phaser.Scene {
     this.mindCaches = survivors;
 
     const cacheCfg = getMindCacheConfig();
-    const targetCount = cacheCfg.baseCount + Math.min(
+    const scarcity = this.currentLevel.rule === 'scarcity';
+    const baseTargetCount = cacheCfg.baseCount + Math.min(
       cacheCfg.maxCountBonus,
       this.currentWaveIdx * cacheCfg.countPerWave,
     );
+    const targetCount = scarcity ? Math.max(2, Math.round(baseTargetCount * 0.55)) : baseTargetCount;
     if (this.mindCaches.length >= targetCount) return;
 
     const occupied = new Set(this.mindCaches.map(cache => this.keyOfCell(cache.cell)));
@@ -1754,6 +2264,7 @@ export class BattleScene extends Phaser.Scene {
         const cell = { col, row };
         if (!this.canHostMindCache(cell)) continue;
         if (occupied.has(this.keyOfCell(cell))) continue;
+        if (this.isSuppressedByDryWell(cell)) continue;
         if (!this.isNearBuildCell(cell, cacheCfg.nearBuildRadiusSq)) continue;
         candidates.push(cell);
       }
@@ -1762,12 +2273,12 @@ export class BattleScene extends Phaser.Scene {
     candidates.sort(() => Math.random() - 0.5);
     while (this.mindCaches.length < targetCount && candidates.length) {
       const cell = candidates.pop()!;
-      const hp = cacheCfg.baseHp
+      const hp = Math.round((cacheCfg.baseHp
         + this.currentWaveIdx * cacheCfg.hpPerWave
-        + Math.floor(Math.random() * cacheCfg.hpRandom);
-      const reward = cacheCfg.baseReward
+        + Math.floor(Math.random() * cacheCfg.hpRandom)) * (scarcity ? 0.9 : 1));
+      const reward = Math.round((cacheCfg.baseReward
         + Math.min(cacheCfg.rewardWaveCap, this.currentWaveIdx * cacheCfg.rewardPerWave)
-        + Math.floor(Math.random() * cacheCfg.rewardRandom);
+        + Math.floor(Math.random() * cacheCfg.rewardRandom)) * (scarcity ? 1.75 : 1));
       this.mindCaches.push(new MindCache(this, { cell, grid: this.grid, hp, reward }));
       occupied.add(this.keyOfCell(cell));
     }
@@ -1778,6 +2289,15 @@ export class BattleScene extends Phaser.Scene {
     if (this.grid.get(cell.col, cell.row) !== 'block') return false;
     if (this.grid.getTowerId(cell.col, cell.row) > 0) return false;
     return !this.playerBuildCells.some(c => this.keyOfCell(c) === this.keyOfCell(cell));
+  }
+
+  private isSuppressedByDryWell(cell: GridPos): boolean {
+    const point = this.grid.cellCenter(cell.col, cell.row);
+    return this.mapElements.some((element) => (
+      element.alive &&
+      element.kind === 'dry_well' &&
+      this.withinElementRadius(point.x, point.y, element)
+    ));
   }
 
   private isNearBuildCell(cell: GridPos, radiusSq: number): boolean {
@@ -1852,7 +2372,7 @@ export class BattleScene extends Phaser.Scene {
       this.showEndPanel({
         title: '梦境溃散',
         subtitle: 'GAME OVER',
-        body: '理智值归零。她在凌晨醒来，浑身是汗。\n但她记得你曾走到过这里——下一晚再来一次吧。',
+        body: '理智值归零。她在凌晨醒来，浑身是汗。\n但她记得你曾走到过这里——下一轮再来一次吧。',
         primaryLabel: '返回主页',
         primaryAction: () => {
           this.cameras.main.fadeFrom(0);
@@ -2052,7 +2572,7 @@ export class BattleScene extends Phaser.Scene {
     (this as any)._endPanelObjs = allFade;
   }
 
-  // ===================== Mouse interactions =====================
+  // ===================== 鼠标交互 =====================
 
   private onPointerMove(p: Phaser.Input.Pointer): void {
     if (this.sculptMode) {
@@ -2101,8 +2621,7 @@ export class BattleScene extends Phaser.Scene {
   private onPointerDown(p: Phaser.Input.Pointer): void {
     if (this.phase === 'gameover' || this.phase === 'victory') return;
 
-    // Right-click is a universal "cancel": clears the placement cursor or
-    // closes the management popup, never tries to place / open anything.
+    // 右键是全局取消：清除放置光标或关闭管理弹层，不执行建造/打开操作。
     if (p.rightButtonDown()) {
       if (this.selectedTowerKind) {
         this.selectedTowerKind = null;
@@ -2124,7 +2643,7 @@ export class BattleScene extends Phaser.Scene {
       return;
     }
 
-    // 1) If we currently have a tower selected for placement, try placing.
+    // 1) 当前选中待放置塔时，优先尝试建造。
     if (this.selectedTowerKind) {
       const cell = this.grid.pixelToCell(p.x, p.y);
       if (this.canPlaceTowerAt(this.selectedTowerKind, cell)) {
@@ -2133,7 +2652,7 @@ export class BattleScene extends Phaser.Scene {
       return;
     }
 
-    // 2) Otherwise, did the user click an existing tower? Open management popup.
+    // 2) 未选塔时，点击已有塔则打开管理弹层。
     const cell = this.grid.pixelToCell(p.x, p.y);
     if (!this.grid.inBounds(cell.col, cell.row)) return;
     const towerId = this.grid.getTowerId(cell.col, cell.row);
@@ -2150,6 +2669,10 @@ export class BattleScene extends Phaser.Scene {
       return;
     }
     if (!this.canPlaceTowerAt(kind, cell)) {
+      if (this.isSuppressedByDryWell(cell)) {
+        this.flashMessage('枯井压制中：先打掉枯井再建塔', '#fde68a', 1400);
+        return;
+      }
       this.flashMessage(def.placement === 'path' ? '边界桩只能种在路线格上' : '这里不是可建造格', '#fb7185', 1100);
       return;
     }
@@ -2164,6 +2687,7 @@ export class BattleScene extends Phaser.Scene {
 
   private canPlaceTowerAt(kind: TowerKind, cell: GridPos): boolean {
     const def = TOWER_DEFS[kind];
+    if (this.isSuppressedByDryWell(cell)) return false;
     return this.grid.canPlaceTower(cell.col, cell.row, def.placement);
   }
 
@@ -2175,6 +2699,7 @@ export class BattleScene extends Phaser.Scene {
     if (this.grid.get(cell.col, cell.row) !== 'block') return false;
     if (this.grid.getTowerId(cell.col, cell.row) > 0) return false;
     if (this.mindCacheAt(cell)) return false;
+    if (this.isSuppressedByDryWell(cell)) return false;
     return true;
   }
 
@@ -2186,6 +2711,10 @@ export class BattleScene extends Phaser.Scene {
       }
       if (this.mind < SCULPT_COST) {
         this.flashMessage(`念力不足（塑形需要 ${SCULPT_COST}）`, '#fb7185', 1200);
+        return;
+      }
+      if (this.isSuppressedByDryWell(cell)) {
+        this.flashMessage('枯井压制中：先打掉枯井再开塔位', '#fde68a', 1400);
         return;
       }
       this.flashMessage('这里不能塑形：只能改造普通阻塞格', '#fb7185', 1100);
@@ -2219,7 +2748,7 @@ export class BattleScene extends Phaser.Scene {
   private openTowerPopup(tower: Tower, _p: Phaser.Input.Pointer): void {
     this.closePopup();
     tower.setRangeHighlighted(true);
-    // Convert game-canvas pixel position to viewport CSS pixels.
+    // 将游戏画布坐标换算成浏览器视口 CSS 像素，供 DOM 弹层定位。
     const canvas = this.game.canvas;
     const rect = canvas.getBoundingClientRect();
     const scaleX = rect.width / this.scale.width;
@@ -2283,7 +2812,7 @@ export class BattleScene extends Phaser.Scene {
   private removeTower(tower: Tower): void {
     this.grid.removeTower(tower.cell.col, tower.cell.row);
     this.towers = this.towers.filter(t => t !== tower);
-    // Dust burst
+    // 拆除时的短促尘埃反馈。
     const r = this.add.circle(tower.pos.x, tower.pos.y, tower.def.radius + 4, 0xa78bfa, 0.55).setDepth(30);
     r.setScale(0.4);
     this.tweens.add({

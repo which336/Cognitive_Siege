@@ -1,0 +1,18 @@
+level_id,id,kind,wave_start,wave_end,col,row,radius_cells,hp,reward,cooldown_ms,effect_mul,pair_id,route,note
+level_2,breath_mid,breath_vent,1,10,11,5,2,0,0,6000,1.22,,,center breath valve
+level_2,breath_upper,breath_vent,1,10,12,3,2,0,0,6000,1.22,,,upper lung phase
+level_2,breath_lower,breath_vent,1,10,12,8,2,0,0,6000,1.22,,,lower lung phase
+level_3,mirror_a_top,mirror_gate,3,10,9,4,2,260,24,5500,0.55,mirror_a,long,upper mirror repeats to lower route
+level_3,mirror_a_bottom,mirror_gate,3,10,9,8,2,260,24,5500,0.55,mirror_a,short,lower mirror repeats to upper route
+level_3,mirror_b_top,mirror_gate,5,10,17,2,2,320,30,5500,0.55,mirror_b,long,edge mirror repeats to lower route
+level_3,mirror_b_bottom,mirror_gate,5,10,14,8,2,320,30,5500,0.55,mirror_b,edge,lower mirror repeats to edge route
+level_4,dry_well_1,dry_well,1,10,8,9,2,240,90,0,1,,,early dry well resource
+level_4,dry_well_2,dry_well,3,10,13,8,2,300,110,0,1,,,mid dry well resource
+level_4,dry_well_3,dry_well,6,10,16,5,2,360,130,0,1,,,late dry well resource
+level_5,fracture_top,fracture_node,1,10,16,1,2,260,35,0,1.3,,edge,top edge acceleration crack
+level_5,fracture_side,fracture_node,1,10,20,4,2,320,45,0,1.3,,edge,side breach acceleration crack
+level_5,fracture_core,fracture_node,7,10,20,7,2,380,60,0,1.25,,edge,late core crack
+level_6,trial_w3,trial_obelisk,3,3,10,6,2,340,45,0,0.75,,,first elite anchor
+level_6,trial_w6,trial_obelisk,6,6,14,7,2,420,55,0,0.75,,,second elite anchor
+level_6,trial_w9,trial_obelisk,9,9,18,7,2,500,70,0,0.75,,,third elite anchor
+level_6,trial_w10,trial_obelisk,10,10,18,8,3,620,90,0,0.75,,,final trial anchor

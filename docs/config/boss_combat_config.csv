@@ -1,23 +1,47 @@
 category,key,value,note
-global,summon_interval_ms,5000,boss minion summon interval
-global,core_tick_interval_ms,900,boss core attack tick interval
-global,core_damage_factor,0.35,boss effective damage factor while attacking core
-global,core_min_damage,2,min damage per boss core tick
-wave_skill,5,anxiety_core,wave 5 boss skill
-wave_skill,10,depression_core,wave 10 boss skill
-skill_display,anxiety_core,焦虑之核,boss skill display name
-skill_display,depression_core,执念,boss skill display name
-skill_aura_speed_mul,anxiety_core,1.10,anxiety core global enemy speed multiplier
-skill_enraged_damage_mul,anxiety_core,1.20,anxiety core enraged enemy damage multiplier
-skill_shield_max_hp_ratio,depression_core,0.10,depression core shield ratio
-skill_enraged_damage_taken_mul,depression_core,0.80,depression core enraged damage taken multiplier
-minion_kind,anxiety_core,anxiety,minion kind
-minion_hp_mul,anxiety_core,1.05,minion HP multiplier
-minion_speed_mul,anxiety_core,1.20,minion speed multiplier
-minion_path_bias,anxiety_core,short,minion route bias
-minion_skills,anxiety_core,rush,minion skills separated by |
-minion_kind,depression_core,depression,minion kind
-minion_hp_mul,depression_core,1.05,minion HP multiplier
-minion_speed_mul,depression_core,1.00,minion speed multiplier
-minion_path_bias,depression_core,short,minion route bias
-minion_skills,depression_core,,minion skills separated by |
+global,summon_interval_ms,5000,Boss召唤小怪的间隔毫秒
+global,core_tick_interval_ms,900,Boss压迫自我核心的扣SAN间隔毫秒
+global,core_damage_factor,0.35,Boss压核心时按自身伤害折算的系数
+global,core_min_damage,2,Boss每次压核心的最低SAN伤害
+wave_skill,5,anxiety_core,找不到Boss本体类型时第5波兜底技能
+wave_skill,10,obsession_core,找不到Boss本体类型时第10波兜底技能
+skill_display,anxiety_core,焦虑之核,技能横幅显示名
+skill_display,depression_core,抑郁重雾,技能横幅显示名
+skill_display,obsession_core,执念循环,技能横幅显示名
+skill_display,guilt_core,自责审判,技能横幅显示名
+skill_display,ptsd_core,裂隙闪回,技能横幅显示名
+skill_aura_speed_mul,anxiety_core,1.10,焦虑Boss光环：全场心魔移速倍率
+skill_enraged_damage_mul,anxiety_core,1.20,焦虑Boss狂暴：心魔核心/路障攻击倍率
+skill_shield_max_hp_ratio,depression_core,0.10,抑郁Boss护盾：按最大生命增加护盾比例
+skill_enraged_damage_taken_mul,depression_core,0.80,抑郁Boss狂暴：心魔受伤倍率；0.80表示减伤20%
+skill_shield_max_hp_ratio,obsession_core,0.10,强迫Boss护盾：按最大生命增加护盾比例
+skill_enraged_damage_taken_mul,obsession_core,0.80,强迫Boss狂暴：心魔受伤倍率；0.80表示减伤20%
+skill_shield_max_hp_ratio,guilt_core,0.08,自责Boss护盾：按最大生命增加护盾比例
+skill_enraged_damage_taken_mul,guilt_core,0.88,自责Boss狂暴：心魔受伤倍率；0.88表示减伤12%
+skill_shield_max_hp_ratio,ptsd_core,0.08,创伤Boss护盾：按最大生命增加护盾比例
+skill_enraged_damage_taken_mul,ptsd_core,0.90,创伤Boss狂暴：心魔受伤倍率；0.90表示减伤10%
+minion_kind,anxiety_core,anxiety,该Boss技能召唤的小怪类型
+minion_hp_mul,anxiety_core,1.05,召唤小怪HP倍率
+minion_speed_mul,anxiety_core,1.20,召唤小怪速度倍率
+minion_path_bias,anxiety_core,short,召唤小怪路线倾向
+minion_skills,anxiety_core,rush,召唤小怪技能标签，多个用|分隔
+minion_kind,depression_core,depression,该Boss技能召唤的小怪类型
+minion_hp_mul,depression_core,1.05,召唤小怪HP倍率
+minion_speed_mul,depression_core,1.00,召唤小怪速度倍率
+minion_path_bias,depression_core,long,召唤小怪路线倾向
+minion_skills,depression_core,,召唤小怪技能标签，多个用|分隔
+minion_kind,obsession_core,obsession,该Boss技能召唤的小怪类型
+minion_hp_mul,obsession_core,1.05,召唤小怪HP倍率
+minion_speed_mul,obsession_core,1.05,召唤小怪速度倍率
+minion_path_bias,obsession_core,edge,召唤小怪路线倾向
+minion_skills,obsession_core,split,召唤小怪技能标签，多个用|分隔
+minion_kind,guilt_core,guilt,该Boss技能召唤的小怪类型
+minion_hp_mul,guilt_core,1.05,召唤小怪HP倍率
+minion_speed_mul,guilt_core,1.00,召唤小怪速度倍率
+minion_path_bias,guilt_core,long,召唤小怪路线倾向
+minion_skills,guilt_core,stealth,召唤小怪技能标签，多个用|分隔
+minion_kind,ptsd_core,ptsd,该Boss技能召唤的小怪类型
+minion_hp_mul,ptsd_core,1.05,召唤小怪HP倍率
+minion_speed_mul,ptsd_core,1.00,召唤小怪速度倍率
+minion_path_bias,ptsd_core,edge,召唤小怪路线倾向
+minion_skills,ptsd_core,,召唤小怪技能标签，多个用|分隔

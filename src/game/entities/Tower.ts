@@ -4,6 +4,9 @@ import { TOWER_DEFS, TowerDef } from '../data/towers';
 import { Enemy } from './Enemy';
 import { Grid } from '../systems/Grid';
 import { MindCache } from './MindCache';
+import { MapElementActor } from './MapElementActor';
+
+type TowerTarget = Enemy | MindCache | MapElementActor;
 
 export interface TowerOpts {
   kind: TowerKind;
@@ -15,15 +18,17 @@ let TOWER_ID = 1;
 
 const MAX_LEVEL = 3;
 
-const LEVEL_DAMAGE_MUL = [1, 1.55, 2.4];     // L1, L2, L3
+const LEVEL_DAMAGE_MUL = [1, 1.55, 2.4];     // L1、L2、L3 对应倍率。
 const LEVEL_RANGE_MUL  = [1, 1.12, 1.25];
 const LEVEL_FIRERATE_MUL = [1, 1.12, 1.28];
 const LEVEL_PERCENT_MUL = [1, 1.24, 1.52];
 const LEVEL_BLOCK_HP_MUL = [1, 1.45, 2.05];
 const TOWER_ART_DISPLAY_WIDTH = [96, 102, 108];
 const TOWER_ART_DISPLAY_HEIGHT = [84, 88, 92];
-/** Cost to upgrade FROM level i TO level i+1, as multiplier of base cost. */
-const LEVEL_UPGRADE_COST_MUL = [1.0, 1.6];   // L1→L2, L2→L3
+const BLOCK_HP_BAR_WIDTH = 42;
+const BLOCK_HP_BAR_HEIGHT = 5;
+/** 从当前等级升到下一等级的费用倍率，基于塔的基础价格计算。 */
+const LEVEL_UPGRADE_COST_MUL = [1.0, 1.6];   // L1 -> L2、L2 -> L3。
 
 export class Tower {
   static next(): number { return TOWER_ID++; }
@@ -42,14 +47,14 @@ export class Tower {
   damage: number;
   splashRadius: number;
 
-  cooldownEndAt = 0;     // gameTime ms
+  cooldownEndAt = 0;     // gameTime 毫秒。
   hallucinated = false;
   hallucinationEndAt = 0;
   blockHpMax = 0;
   blockHp = 0;
   blockHitFxAt = 0;
 
-  // Visuals
+  // 视觉对象由 Tower 自己管理，场景只负责创建/销毁和数组持有。
   body: Phaser.GameObjects.Container;
   base: Phaser.GameObjects.Arc;
   shadow: Phaser.GameObjects.Ellipse;
@@ -103,14 +108,18 @@ export class Tower {
     if (this.artSprite) this.body.add(this.artSprite);
     this.body.add(this.glyph);
     if (this.kind === 'boundary') {
-      this.blockHpBarBg = scene.add.rectangle(0, -34, 36, 4, 0x000000, 0.58).setOrigin(0.5, 1);
-      this.blockHpBarFill = scene.add.rectangle(-18, -34, 36, 4, 0x9fe870, 1).setOrigin(0, 1);
+      const barY = this.blockHpBarY();
+      this.blockHpBarBg = scene.add.rectangle(0, barY, BLOCK_HP_BAR_WIDTH, BLOCK_HP_BAR_HEIGHT, 0x000000, 0.64)
+        .setOrigin(0.5, 1)
+        .setStrokeStyle(1, 0xd9f99d, 0.62);
+      this.blockHpBarFill = scene.add.rectangle(-BLOCK_HP_BAR_WIDTH / 2, barY, BLOCK_HP_BAR_WIDTH, BLOCK_HP_BAR_HEIGHT, 0x9fe870, 1)
+        .setOrigin(0, 1);
       this.body.add([this.blockHpBarBg, this.blockHpBarFill]);
     }
     this.body.setDepth(this.depthForCell());
     this.refreshArt();
 
-    // Tower must be interactive so the scene can pop the upgrade/sell menu.
+    // 塔必须可交互，场景才能弹出升级/出售菜单。
     const hitR = this.artSprite ? 32 : this.def.radius + 8;
     this.body.setSize(hitR * 2, hitR * 2);
     this.body.setInteractive(new Phaser.Geom.Circle(0, 0, hitR), Phaser.Geom.Circle.Contains);
@@ -120,25 +129,25 @@ export class Tower {
     this.body.destroy();
   }
 
-  /** Returns next-level upgrade cost in mind power, or null if maxed. */
+  /** 返回下一等级升级费用；满级时返回 null。 */
   getUpgradeCost(): number | null {
     if (this.level >= MAX_LEVEL) return null;
     const mul = LEVEL_UPGRADE_COST_MUL[this.level - 1];
     return Math.round(this.def.cost * mul);
   }
 
-  /** Refund value when selling: 70% of total invested. */
+  /** 出售返还总投入的 70%。 */
   getSellValue(): number {
     return Math.floor(this.totalInvested * 0.7);
   }
 
-  /** Apply level-up: bumps stats, repaints, charges nothing here (caller handles cost). */
+  /** 执行升级：只提升数值和刷新表现，扣费由调用方负责。 */
   upgrade(): boolean {
     if (this.level >= MAX_LEVEL) return false;
     const cost = this.getUpgradeCost() ?? 0;
     this.totalInvested += cost;
     this.level++;
-    // Recompute stats from base × level multipliers
+    // 始终从基础值乘等级倍率重算，避免多次升级产生累积误差。
     const idx = this.level - 1;
     this.range = this.def.range * LEVEL_RANGE_MUL[idx];
     this.fireRate = this.def.fireRate * LEVEL_FIRERATE_MUL[idx];
@@ -152,9 +161,9 @@ export class Tower {
       this.blockHp = this.blockHpMax;
     }
     this.refreshBlockHpBar();
-    // Refresh range ring
+    // 刷新射程圈，让升级后的有效范围立即可见。
     this.rangeRing.setRadius(this.range);
-    // Visual upgrade
+    // 无美术素材时用简单几何元素表达等级提升。
     if (!this.artSprite && this.level === 2 && !this.level2Ring) {
       this.level2Ring = this.scene.add.circle(0, 0, this.def.radius + 4, this.def.color, 0)
         .setStrokeStyle(1.5, this.def.color, 0.95);
@@ -175,7 +184,7 @@ export class Tower {
       }
     }
     this.refreshArt();
-    // Pulse animation
+    // 升级脉冲反馈。
     this.scene.tweens.add({
       targets: this.body,
       scale: this.level === 3 ? 1.02 : 1.015,
@@ -232,6 +241,8 @@ export class Tower {
     this.body.setDepth(this.depthForCell());
     this.body.bringToTop(this.artSprite);
     this.body.bringToTop(this.glyph);
+    this.positionBlockHpBar();
+    this.bringBlockHpBarToTop();
   }
 
   private depthForCell(): number {
@@ -246,8 +257,31 @@ export class Tower {
     return TOWER_ART_DISPLAY_HEIGHT[this.level - 1];
   }
 
-  /** Per-frame logic, driven by gameTime (which respects timeScale). */
-  update(gameTime: number, enemies: Enemy[], mindCaches: MindCache[], depressionDebuffFn: (t: Tower) => number): void {
+  private blockHpBarY(): number {
+    if (this.artSprite) return this.artSprite.y - this.artDisplayHeight() / 2 - 6;
+    return -this.def.radius - 10;
+  }
+
+  private positionBlockHpBar(): void {
+    if (!this.blockHpBarBg || !this.blockHpBarFill) return;
+    const barY = this.blockHpBarY();
+    this.blockHpBarBg.setPosition(0, barY);
+    this.blockHpBarFill.setPosition(-BLOCK_HP_BAR_WIDTH / 2, barY);
+  }
+
+  private bringBlockHpBarToTop(): void {
+    if (this.blockHpBarBg) this.body.bringToTop(this.blockHpBarBg);
+    if (this.blockHpBarFill) this.body.bringToTop(this.blockHpBarFill);
+  }
+
+  /** 每帧逻辑由 gameTime 驱动，因此会跟随游戏倍速。 */
+  update(
+    gameTime: number,
+    enemies: Enemy[],
+    mindCaches: MindCache[],
+    mapElements: MapElementActor[],
+    depressionDebuffFn: (t: Tower) => number,
+  ): void {
     if (this.hallucinated && gameTime > this.hallucinationEndAt) {
       this.setHallucination(false, 0, gameTime);
     }
@@ -259,17 +293,18 @@ export class Tower {
     const effectiveFireRate = this.fireRate * (1 - debuff);
     const cdMs = effectiveFireRate <= 0.001 ? 99999 : 1000 / effectiveFireRate;
 
-    const enemyTarget = this.pickTarget(enemies);
-    const cacheTarget = enemyTarget ? null : this.pickMindCacheTarget(mindCaches);
-    if (!enemyTarget && !cacheTarget) return;
+    const primaryTarget = this.pickTarget(enemies, mapElements);
+    const cacheTarget = primaryTarget ? null : this.pickMindCacheTarget(mindCaches);
+    if (!primaryTarget && !cacheTarget) return;
 
     this.cooldownEndAt = gameTime + cdMs;
-    if (enemyTarget) this.fire(enemyTarget, enemies, mindCaches);
-    else if (cacheTarget) this.fire(cacheTarget, enemies, mindCaches);
+    if (primaryTarget) this.fire(primaryTarget, enemies, mindCaches, mapElements);
+    else if (cacheTarget) this.fire(cacheTarget, enemies, mindCaches, mapElements);
   }
 
-  private pickTarget(enemies: Enemy[]): Enemy | null {
-    const candidates: Enemy[] = [];
+  private pickTarget(enemies: Enemy[], mapElements: MapElementActor[]): Enemy | MapElementActor | null {
+    // 嘲讽目标优先；隐身目标只有共鸣塔能稳定发现。
+    const candidates: Array<Enemy | MapElementActor> = [];
     for (const e of enemies) {
       if (!e.alive) continue;
       if (e.cloaked && !e.revealed && this.kind !== 'resonance') continue;
@@ -278,21 +313,35 @@ export class Tower {
       if (dx * dx + dy * dy > this.range * this.range) continue;
       candidates.push(e);
     }
+    for (const element of mapElements) {
+      if (!element.isAttackable()) continue;
+      const dx = element.body.x - this.pos.x;
+      const dy = element.body.y - this.pos.y;
+      if (dx * dx + dy * dy > this.range * this.range) continue;
+      candidates.push(element);
+    }
     if (this.hallucinated && candidates.length) {
       return candidates[Math.floor(Math.random() * candidates.length)];
     }
     if (!candidates.length) return null;
 
-    const taunting = candidates.filter(e => e.spec.skills.includes('taunt'));
+    const taunting = candidates.filter((target) => (
+      (target instanceof Enemy && (target.spec.skills.includes('taunt') || target.mapElementTaunt)) ||
+      (target instanceof MapElementActor && target.kind === 'trial_obelisk')
+    ));
     const pool = taunting.length ? taunting : candidates;
-    return pool.reduce((best, enemy) => (
-      this.targetScore(enemy) > this.targetScore(best) ? enemy : best
+    return pool.reduce((best, target) => (
+      this.targetScore(target) > this.targetScore(best) ? target : best
     ));
   }
 
-  private targetScore(enemy: Enemy): number {
+  private targetScore(target: Enemy | MapElementActor): number {
+    if (target instanceof MapElementActor) return this.mapElementTargetScore(target);
+
+    const enemy = target;
+    // 目标评分偏向“威胁更高且更接近核心”的敌人，同时略微降低残血补刀权重。
     const skillThreat =
-      (enemy.spec.skills.includes('taunt') ? 10000 : 0) +
+      ((enemy.spec.skills.includes('taunt') || enemy.mapElementTaunt) ? 10000 : 0) +
       (enemy.spec.skills.includes('shield') ? 260 : 0) +
       (enemy.isBoss ? 240 : 0);
     const kindThreat = ({
@@ -309,7 +358,23 @@ export class Tower {
     return skillThreat + kindThreat + hpBulk + progressPressure - woundedPenalty;
   }
 
+  private mapElementTargetScore(element: MapElementActor): number {
+    const base = ({
+      trial_obelisk: 10850,
+      fracture_node: 1180,
+      mirror_gate: 1080,
+      dry_well: 460,
+      breath_vent: 0,
+    } as Record<MapElementActor['kind'], number>)[element.kind];
+    const wounded = (1 - element.hp / Math.max(1, element.hpMax)) * 90;
+    const dx = element.body.x - this.pos.x;
+    const dy = element.body.y - this.pos.y;
+    const distancePressure = Math.max(0, 120 - Math.hypot(dx, dy));
+    return base + wounded + distancePressure + element.reward * 0.8;
+  }
+
   private pickMindCacheTarget(caches: MindCache[]): MindCache | null {
+    // 没有敌人时才打念力残堆，避免资源目标抢走防守火力。
     if (this.range <= 0) return null;
     const candidates: MindCache[] = [];
     for (const cache of caches) {
@@ -333,8 +398,9 @@ export class Tower {
     return cache.reward * 2 + wounded + distancePressure;
   }
 
-  private fire(target: Enemy | MindCache, allEnemies: Enemy[], allCaches: MindCache[]): void {
-    if (this.kind === 'memory')        this.fireAOE(target, allEnemies, allCaches);
+  private fire(target: TowerTarget, allEnemies: Enemy[], allCaches: MindCache[], allMapElements: MapElementActor[]): void {
+    // 每种塔只在这里分发一次攻击形态，便于保持 update 的流程清晰。
+    if (this.kind === 'memory')        this.fireAOE(target, allEnemies, allCaches, allMapElements);
     else if (this.kind === 'belief')   this.fireSingle(target);
     else if (this.kind === 'resonance')this.fireResonance(target, allEnemies);
     else if (this.kind === 'insight')  this.fireInsight(target);
@@ -365,7 +431,7 @@ export class Tower {
     this.rangeRing.setAlpha(active ? 1 : 1);
   }
 
-  private fireAOE(target: Enemy | MindCache, all: Enemy[], caches: MindCache[]): void {
+  private fireAOE(target: TowerTarget, all: Enemy[], caches: MindCache[], mapElements: MapElementActor[]): void {
     const tx = target.body.x;
     const ty = target.body.y;
     if (this.scene.textures.exists('fx-memory')) {
@@ -410,9 +476,17 @@ export class Tower {
         cache.takeDamage(this.damage, 'memory');
       }
     }
+    for (const element of mapElements) {
+      if (!element.isAttackable()) continue;
+      const dx = element.body.x - tx;
+      const dy = element.body.y - ty;
+      if (dx * dx + dy * dy <= this.splashRadius * this.splashRadius) {
+        element.takeDamage(this.damage, 'memory');
+      }
+    }
   }
 
-  private fireSingle(target: Enemy | MindCache): void {
+  private fireSingle(target: TowerTarget): void {
     const tx = target.body.x;
     const ty = target.body.y;
     if (this.scene.textures.exists('fx-belief')) {
@@ -447,7 +521,7 @@ export class Tower {
     });
   }
 
-  private fireInsight(target: Enemy | MindCache): void {
+  private fireInsight(target: TowerTarget): void {
     const tx = target.body.x;
     const ty = target.body.y;
     const damage = Math.ceil(target.hp * this.percentDamageRate());
@@ -476,7 +550,7 @@ export class Tower {
     target.takeDamage(damage, 'insight');
   }
 
-  private fireResonance(target: Enemy | MindCache, all: Enemy[]): void {
+  private fireResonance(target: TowerTarget, all: Enemy[]): void {
     if (this.scene.textures.exists('fx-resonance')) {
       const tx = target.body.x;
       const ty = target.body.y;
@@ -503,7 +577,7 @@ export class Tower {
         targets: line, alpha: 0, duration: 200, onComplete: () => line.destroy(),
       });
     }
-    if (target instanceof MindCache) {
+    if (!(target instanceof Enemy)) {
       target.takeDamage(this.damage, 'resonance');
       return;
     }
@@ -522,6 +596,7 @@ export class Tower {
   }
 
   blockEnemy(enemy: Enemy, gameTime: number, damage: number): boolean {
+    // 边界桩是路线格上的临时阻挡物，持续扣自身耐久并短暂禁锢敌人。
     if (this.kind !== 'boundary') return false;
     if (this.hallucinated) return false;
     if (this.blockHp <= 0) return false;
@@ -532,6 +607,7 @@ export class Tower {
     if (dx * dx + dy * dy > 28 * 28) return false;
 
     enemy.applyRoot(140, gameTime);
+    enemy.suppressFlicker(320, gameTime);
     this.takeBlockDamage(damage, gameTime);
     return this.blockHp <= 0;
   }
@@ -557,7 +633,9 @@ export class Tower {
   private refreshBlockHpBar(): void {
     if (!this.blockHpBarFill) return;
     const ratio = this.blockHpMax > 0 ? Math.max(0, this.blockHp / this.blockHpMax) : 0;
-    this.blockHpBarFill.width = 36 * ratio;
+    this.positionBlockHpBar();
+    this.blockHpBarFill.width = BLOCK_HP_BAR_WIDTH * ratio;
+    this.bringBlockHpBarToTop();
     if (ratio > 0.5) this.blockHpBarFill.fillColor = 0x9fe870;
     else if (ratio > 0.25) this.blockHpBarFill.fillColor = 0xfde68a;
     else this.blockHpBarFill.fillColor = 0xfb7185;

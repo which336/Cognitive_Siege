@@ -3,20 +3,19 @@ import { EnemyKind } from '../../types';
 export interface DemonPersona {
   name: string;
   age: string;
-  motive: string;        // why it haunts
-  speech: string;        // tone descriptor
+  motive: string;        // 它为何纠缠患者。
+  speech: string;        // 台词语气描述。
   spawnLines: string[];
   hurtLines: string[];
   deathLines: string[];
 }
 
-// 4-6 personas per kind. Picked at random when spawning each enemy so the
-// review agent has rich material to draw from.
+// 每类心魔准备 4-6 个人格，出生时随机抽取，让复盘 Agent 有更丰富的叙事素材。
 export const PERSONAS: Record<EnemyKind, DemonPersona[]> = {
   anxiety: [
     {
       name: '九点钟的钟摆',
-      age: '今晚出生',
+      age: '刚刚成形',
       motive: '它害怕被你忘了，于是一直摇晃。',
       speech: '高频、咬断尾音',
       spawnLines: ['——还来得及，还来得及。', '迟到了，迟到了，迟到了。'],

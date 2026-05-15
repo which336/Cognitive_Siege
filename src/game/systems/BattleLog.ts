@@ -1,8 +1,8 @@
 import { BattleSummary, CombatLogEntry, TowerKind, GridPos } from '../../types';
 
 /**
- * Collects per-enemy combat data during a wave so the LLM review agent has
- * structured material to analyze. One instance per wave.
+ * 收集单波战斗中的逐敌人数据，供 LLM 复盘 Agent 结构化分析。
+ * 每一波创建一个实例。
  */
 export class BattleLog {
   waveIndex: number;

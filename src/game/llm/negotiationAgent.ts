@@ -27,15 +27,16 @@ export interface NegotiationContext {
   persona: BossPersona;
   /** 上一轮玩家选择的 tag（首轮为 null） */
   lastPlayerTag: ChoiceTag | null;
-  turnIndex: number; // 0-based
+  turnIndex: number; // 从 0 开始计数，匹配 UI 展示的对话轮次。
   signal?: AbortSignal;
 }
 
-function fallback(turn: number, waveIndex: number): DialogueTurn {
-  return fallbackDialogue(waveIndex, turn);
+function fallback(turn: number, waveIndex: number, levelId: string): DialogueTurn {
+  return fallbackDialogue(levelId, waveIndex, turn);
 }
 
 function sanitizeTurn(parsed: any): DialogueTurn | null {
+  // BOSS 台词可以自由发挥，但玩家选项必须落在固定三类谈判标签里。
   if (!parsed) return null;
   const line = typeof parsed.boss_line === 'string' ? parsed.boss_line.trim() : '';
   const choicesRaw = Array.isArray(parsed.choices) ? parsed.choices : [];
@@ -47,7 +48,7 @@ function sanitizeTurn(parsed: any): DialogueTurn | null {
   }
   if (!line || choices.length < 3) return null;
 
-  // Make sure we have all three tags. If duplicated, fall back.
+  // 保证三种标签都出现；模型重复给标签时补齐最小可用选项。
   const tagSet = new Set(choices.map(x => x.tag));
   if (tagSet.size < 3) {
     const missing = VALID_TAGS.filter(t => !tagSet.has(t));
@@ -61,11 +62,12 @@ function sanitizeTurn(parsed: any): DialogueTurn | null {
 export async function runNegotiation(
   ctx: NegotiationContext,
   waveIndex: number,
+  levelId = 'level_1',
 ): Promise<DialogueTurn> {
   const { settings, persona, lastPlayerTag, turnIndex, signal } = ctx;
 
   if (settings.demoMode || !settings.apiKey) {
-    return fallback(turnIndex, waveIndex);
+    return fallback(turnIndex, waveIndex, levelId);
   }
 
   try {
@@ -97,6 +99,6 @@ export async function runNegotiation(
     return sanitized;
   } catch (err) {
     console.warn('[negotiationAgent] falling back:', err);
-    return fallback(turnIndex, waveIndex);
+    return fallback(turnIndex, waveIndex, levelId);
   }
 }

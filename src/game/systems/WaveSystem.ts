@@ -14,6 +14,7 @@ export interface RouteStrategyConfig {
 }
 
 const DEFAULT_ROUTE_STRATEGY: RouteStrategyConfig = {
+  // 路线选择由三部分混合：复盘策略、心魔类型偏好、随机扰动。
   enemyRoutePreferences: {
     anxiety: ['short', 'edge', 'long'],
     depression: ['long', 'short', 'edge'],
@@ -38,6 +39,7 @@ let routeStrategyConfig: RouteStrategyConfig = {
 };
 
 export function setRouteStrategyConfig(config: Partial<RouteStrategyConfig>): void {
+  // 允许 CSV 只覆盖部分权重或偏好，未配置项沿用安全默认值。
   routeStrategyConfig = {
     enemyRoutePreferences: {
       anxiety: [...nonEmptyRoutes(config.enemyRoutePreferences?.anxiety, DEFAULT_ROUTE_STRATEGY.enemyRoutePreferences.anxiety)],
@@ -68,6 +70,7 @@ export function pickRouteForEnemy(
 
   if (spec.pathBias === 'random') return randomRoute(routes);
 
+  // 先尝试听从 Agent 给出的路线策略，再按心魔个性偏好分路，最后保留少量随机性。
   const strategicRoute = resolveRouteVariant(spec.pathBias, waveIndex);
   const preferredRoute = preferredRouteForEnemy(spec.kind, routes);
   const roll = Math.random();
@@ -104,7 +107,7 @@ function randomRoute(openRoutes: RouteVariant[]): RouteVariant {
   return openRoutes[Math.floor(Math.random() * openRoutes.length)] ?? 'short';
 }
 
-/** Picks the actual grid path used by an enemy from the wave's open route set. */
+/** 从本波开放路线中挑出敌人实际使用的格子路径。 */
 export function pickPath(
   spec: EnemySpawnSpec,
   pool: PathPool,
@@ -114,7 +117,7 @@ export function pickPath(
   return pool[pickRouteForEnemy(spec, openRoutes, waveIndex)];
 }
 
-/** Returns the total wave duration (last spawn delay + 8s buffer) for UI hints. */
+/** 估算波次总时长：最后一次刷怪时间 + 8 秒缓冲，用于 UI 提示。 */
 export function estimateWaveDuration(w: WaveSpec): number {
   const last = w.spawns.reduce((m, s) => Math.max(m, s.delayMs), 0);
   return last + 8000;

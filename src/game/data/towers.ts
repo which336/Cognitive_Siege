@@ -5,13 +5,13 @@ export interface TowerDef {
   displayName: string;
   emoji: string;
   cost: number;
-  // L1 stats. Upgrades multiply.
-  range: number;       // pixels
-  fireRate: number;    // shots per second
+  // L1 基础数值，升级时按倍率放大。
+  range: number;       // 像素。
+  fireRate: number;    // 每秒攻击次数。
   damage: number;
-  splashRadius: number; // 0 = single target
+  splashRadius: number; // 0 表示单体攻击。
   color: number;
-  // Special tag handled in tower update logic
+  // 特殊攻击类型，由 Tower 的更新逻辑解释。
   special: 'aoe' | 'single' | 'slow_reveal' | 'support' | 'percent_current' | 'blocker';
   placement: 'build' | 'path';
   percentCurrentHp?: number;
@@ -109,8 +109,8 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
     color: 0x9fe870,
     special: 'blocker',
     placement: 'path',
-    blockHp: 75,
-    desc: '只能种在路线上的肉盾塔。没有攻击力，会短暂挡住心魔，直到耐久归零后消失。',
+    blockHp: 150,
+    desc: '只能种在路线上的肉盾塔。没有攻击力，会短暂挡住心魔，并压制创伤闪回位移，直到耐久归零后消失。',
     radius: 17,
   },
 };

@@ -4,23 +4,23 @@ export interface EnemyDef {
   kind: EnemyKind;
   displayName: string;
   emoji: string;
-  // Base stats. Final stats apply spec multipliers from waves.
+  // 基础数值；最终数值会再乘以波次刷怪倍率。
   hp: number;
-  speed: number; // pixels per second (pre-multiplier)
-  bounty: number; // mind power on kill
-  damage: number; // sanity damage on reach
-  // Visual color (tinted on a generic disc sprite)
+  speed: number; // 基础像素/秒。
+  bounty: number; // 击杀后获得的念力。
+  damage: number; // 抵达核心时造成的理智伤害。
+  // 通用圆形表现的染色。
   color: number;
-  // Distinct behavior tag interpreted by Enemy.update()
+  // Enemy.update() 中解释的独特行为标签。
   behavior:
-    | 'rush'        // anxiety: prefers shortest path, fast
-    | 'aura'        // depression: slow, debuffs nearby tower fire rate
-    | 'loop'        // obsession: occasionally backtracks N tiles
-    | 'cloak'       // guilt: invisible until detected; minor damage if reaches
-    | 'flicker';    // ptsd (boss-supporting): teleports forward on damage
-  // Localized description used in help/UI
+    | 'rush'        // 焦虑：偏好短路，速度快。
+    | 'aura'        // 抑郁：移动慢，削弱附近塔射速。
+    | 'loop'        // 强迫：周期性后退若干距离。
+    | 'cloak'       // 自责：被发现前隐身，漏怪伤害较低。
+    | 'flicker';    // 创伤：受击后向前闪烁。
+  // 帮助面板和 UI 使用的本地化描述。
   desc: string;
-  // Approx radius
+  // 近似碰撞/表现半径。
   radius: number;
 }
 

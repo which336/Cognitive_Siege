@@ -13,8 +13,8 @@ import { el, mountOverlay, typewriter } from './dom';
 
 interface ShowReviewOpts {
   result: ReviewResult;
-  changes: string[];        // human-readable list of next-wave changes
-  nextWaveLabel: string;    // e.g. "下一波 / Wave 6 之 10"
+  changes: string[];        // 下一波改动的可读描述。
+  nextWaveLabel: string;    // 例如“下一波 / Wave 6 之 10”。
   onContinue: () => void;
   isLoading?: boolean;
   onLoadingMsg?: string;
@@ -23,8 +23,8 @@ interface ShowReviewOpts {
 }
 
 /**
- * Show the review panel. If isLoading=true, displays a thinking spinner with
- * a placeholder card; the caller swaps it via showReview again once result arrives.
+ * 展示复盘面板。isLoading=true 时先展示思考占位；
+ * 等 Agent 结果返回后，调用方会再次 showReview 替换内容。
  */
 export function showReview(opts: ShowReviewOpts): { close: () => void } {
   const panel = el('div', { cls: 'cs-panel wide' });
@@ -37,19 +37,19 @@ export function showReview(opts: ShowReviewOpts): { close: () => void } {
     panel.appendChild(el('div', { cls: 'cs-monologue', text: '……' }));
   } else {
     const r = opts.result;
-    // Source badge
+    // 来源标记。
     const sourceLabel = el('div', {
       cls: 'cs-section-label',
       text: r.fromLLM ? `大模型实时生成 · 心声 #${Math.floor(Math.random() * 9000 + 1000)}` : '本地心声库（未配置大模型时启用）',
     });
     panel.appendChild(sourceLabel);
 
-    // Monologue with typewriter effect
+    // 带打字机效果的心魔独白。
     const mono = el('div', { cls: 'cs-monologue' });
     panel.appendChild(mono);
     typewriter(mono, r.monologue, 36);
 
-    // Lessons
+    // 心魔复盘得到的简短启示。
     if (r.lesson.length) {
       panel.appendChild(el('div', { cls: 'cs-section', attrs: { style: 'margin-top:18px;' } }, [
         el('div', { cls: 'cs-section-label', text: '它们学到了什么' }),
@@ -89,7 +89,7 @@ export function showReview(opts: ShowReviewOpts): { close: () => void } {
       ]),
     ]));
 
-    // Concrete changes that the engine applied
+    // 引擎实际应用到下一波的改动。
     if (opts.changes.length) {
       panel.appendChild(el('div', { cls: 'cs-section' }, [
         el('div', { cls: 'cs-section-label', text: '已生效的下波变化' }),

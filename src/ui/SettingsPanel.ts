@@ -10,7 +10,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
   panel.appendChild(el('div', { cls: 'cs-panel-title', text: '设置' }));
   panel.appendChild(el('div', { cls: 'cs-panel-sub', text: '智能体 · 难度 · 演示模式' }));
 
-  // Demo mode
+  // 演示模式。
   const demoCheck = el('input', { attrs: { type: 'checkbox' } }) as HTMLInputElement;
   demoCheck.checked = cur.demoMode;
   panel.appendChild(el('div', { cls: 'cs-section' }, [
@@ -20,7 +20,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
     ]),
   ]));
 
-  // Mute
+  // 静音开关。
   const muteCheck = el('input', { attrs: { type: 'checkbox' } }) as HTMLInputElement;
   muteCheck.checked = cur.muted;
   panel.appendChild(el('div', { cls: 'cs-section' }, [
@@ -30,7 +30,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
     ]),
   ]));
 
-  // API base
+  // API 兼容地址。
   const apiBaseInput = el('input', {
     cls: 'cs-input',
     attrs: { type: 'text', placeholder: 'https://api.deepseek.com/v1' },
@@ -41,7 +41,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
     apiBaseInput,
   ]));
 
-  // Model
+  // 模型名称。
   const modelInput = el('input', {
     cls: 'cs-input',
     attrs: { type: 'text', placeholder: 'deepseek-chat / glm-4-flash / qwen-turbo / gpt-4o-mini …' },
@@ -52,7 +52,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
     modelInput,
   ]));
 
-  // API key
+  // API Key。
   const apiKeyInput = el('input', {
     cls: 'cs-input',
     attrs: { type: 'password', placeholder: 'sk-... (仅保存在你本地浏览器 localStorage)' },
@@ -63,7 +63,7 @@ export function showSettings(onClose: (s: UserSettings) => void): { close: () =>
     apiKeyInput,
   ]));
 
-  // Difficulty
+  // 难度。
   const diffSelect = el('select', { cls: 'cs-select' }, [
     el('option', { attrs: { value: 'easy' }, text: '宽容（理智值容错高）' }),
     el('option', { attrs: { value: 'normal' }, text: '常规（默认）' }),

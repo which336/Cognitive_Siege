@@ -14,24 +14,27 @@ import {
 } from '../data/configLoader';
 
 /**
- * Applies a NextStrategy from the review agent to a base WaveSpec.
+ * 将复盘 Agent 给出的 NextStrategy 应用到下一波基础 WaveSpec。
  *
- * Mutations:
- *  - path_weight_shift overrides each spawn's pathBias. The wave system treats
- *    that as a strong route weight, then mixes in enemy route personality and
- *    a small amount of per-spawn randomness.
- *  - formation overrides spawn timing pattern (clustered = burst, scattered = even)
- *  - skill_priority adds tags to spawns probabilistically
- *  - aggression scales hp/speed multipliers and shrinks delays
- *  - preferred_kinds replaces a fraction of "filler" spawns with the listed kinds
- *    while preserving any boss spawns (large hpMul) intact
+ * 变更策略：
+ *  - path_weight_shift 以最高优先级改写刷怪路线倾向；地图规则只能补充开放路线，WaveSystem 再混入少量心魔个性和随机分路。
+ *  - formation 改写出怪节奏（聚团、分散、楔形、后排压力）。
+ *  - skill_priority 按概率给普通心魔打技能标签。
+ *  - aggression 同时影响血量、速度和延迟，形成压迫感。
+ *  - preferred_kinds 替换部分普通刷怪，但保留高 hpMul 的 Boss 刷怪。
  */
 export interface ApplyResult {
   applied: WaveSpec;
-  changes: string[]; // human-readable list shown in the review UI / next-wave preview
+  changes: string[]; // 展示在复盘 UI / 下一波预览里的可读变更。
+}
+
+export interface ApplyStrategyOptions {
+  allUnlocked?: boolean;
 }
 
 const isBossSpawn = (s: EnemySpawnSpec): boolean => s.hpMul >= 5;
+const enemyKindsSet = new Set<EnemyKind>(['anxiety', 'depression', 'obsession', 'guilt', 'ptsd']);
+const skillFlagsSet = new Set<SkillFlag>(['stealth', 'swarm', 'rush', 'split', 'taunt', 'shield']);
 
 const KIND_FRONT_RANK: Record<EnemyKind, number> = {
   depression: 50,
@@ -41,7 +44,7 @@ const KIND_FRONT_RANK: Record<EnemyKind, number> = {
   ptsd: 18,
 };
 
-export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult {
+export function applyStrategy(base: WaveSpec, strat: NextStrategy, opts: ApplyStrategyOptions = {}): ApplyResult {
   const changes: string[] = [];
   const cloned: WaveSpec = {
     ...base,
@@ -49,9 +52,8 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
     spawns: base.spawns.map(s => ({ ...s, skills: [...s.skills] })),
   };
 
-  // 1) Path bias. Boss identity/stats stay intact, and the active route is part
-  // of the wave projection. Individual spawns still make weighted route picks
-  // at runtime so a wave can split across open branches.
+  // 1) 路线倾向：复盘结果优先改写整波路线倾向；Boss 身份和基础数值保持不变。
+  //    单个敌人仍会在运行时按权重从开放分支中挑路，因此一波可以分兵。
   if (cloned.spawns[0]?.pathBias !== strat.path_weight_shift) {
     for (const s of cloned.spawns) {
       s.pathBias = strat.path_weight_shift;
@@ -59,13 +61,14 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
     changes.push(pathBiasLabel(strat.path_weight_shift));
   }
 
-  // 2) Reinforce later waves before timing is assigned. Pressure should come
-  // from more bodies and better composition, not only higher stats.
+  // 2) 中后期先扩充兵力，再重新排时序；压力来自数量和阵容，而不是只堆数值。
   const added = cloned.index >= 5 ? reinforceWave(cloned, strat) : 0;
   if (added > 0) changes.push(`增援单位 +${added}`);
 
-  // 3) Skill priority -> tag a fraction of spawns
-  const allowedSkills = getAllowedSkillsForWave(cloned.index, strat.skill_priority);
+  // 3) 技能优先级：只给已开放的技能打标签，避免教学期越级惩罚玩家。
+  const allowedSkills = opts.allUnlocked
+    ? strat.skill_priority.filter((skill): skill is SkillFlag => skillFlagsSet.has(skill))
+    : getAllowedSkillsForWave(cloned.index, strat.skill_priority);
   if (allowedSkills.length) {
     const stamp = allowedSkills.slice(0, 2);
     let tagged = 0;
@@ -80,9 +83,9 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
     if (tagged) changes.push(`${tagged} 个心魔学到 [${stamp.join('/')}] 技能`);
   }
 
-  // 4) Aggression scales
+  // 4) 侵略度缩放：同一个标量同时影响生存、推进速度和出怪密度。
   const a = clampAggressionForWave(cloned.index, strat.aggression);
-  // map -1..1 -> hp 0.85..1.25 ; speed 0.9..1.2 ; delay 1.25..0.7
+  // -1..1 映射为 hp 0.85..1.25、speed 0.9..1.2、delay 1.25..0.7。
   const hpMulX = 1 + 0.2 * a;
   const spdMulX = 1 + 0.15 * a;
   const delayX = 1 - 0.3 * a;
@@ -96,8 +99,10 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
     changes.push(a > 0 ? `攻势加剧 (+${Math.round(a * 100)}%)` : `转入潜伏 (${Math.round(a * 100)}%)`);
   }
 
-  // 5) Preferred kinds -> swap some non-boss spawns
-  const preferredKinds = getAllowedEnemyKindsForWave(cloned.index, strat.preferred_kinds);
+  // 5) 偏好心魔：替换部分“填充位”，不替换 Boss。
+  const preferredKinds = opts.allUnlocked
+    ? strat.preferred_kinds.filter((kind): kind is EnemyKind => enemyKindsSet.has(kind))
+    : getAllowedEnemyKindsForWave(cloned.index, strat.preferred_kinds);
   if (preferredKinds.length && cloned.index >= 5) {
     const fillerIdx = cloned.spawns
       .map((s, i) => ({ s, i }))
@@ -121,8 +126,7 @@ export function applyStrategy(base: WaveSpec, strat: NextStrategy): ApplyResult 
     if (list) changes.push(`阵容变化：${list}`);
   }
 
-  // 6) Formation -> rewrite delays after composition is finalized. This keeps
-  // review-driven formation changes meaningful after kind swaps/reinforcements.
+  // 6) 阵型最后应用，确保补兵/换兵之后的出怪节奏仍然符合复盘策略。
   applyFormation(cloned, strat.formation);
   changes.push(formationLabel(strat.formation));
 
@@ -136,7 +140,7 @@ function applyFormation(w: WaveSpec, f: Formation): void {
 
   switch (f) {
     case 'clustered': {
-      // Tight bursts; each burst still starts with durable frontliners.
+      // 小批量爆发，每组开头仍放更耐打的前排。
       let t = baseStart;
       for (let i = 0; i < ordered.length; i++) {
         ordered[i].delayMs = t;
@@ -146,13 +150,13 @@ function applyFormation(w: WaveSpec, f: Formation): void {
       break;
     }
     case 'scattered': {
-      // Even spread across the same total span, front to back.
+      // 在原总时长内均匀铺开，按前排到后排排序。
       const step = ordered.length > 1 ? totalSpan / (ordered.length - 1) : 0;
       ordered.forEach((s, i) => { s.delayMs = Math.round(baseStart + i * step); });
       break;
     }
     case 'wedge': {
-      // Accelerating spawns, with the front screen entering before backline.
+      // 间隔逐渐缩短，先给前排站住，再让后排跟进。
       let t = baseStart;
       let gap = Math.max(220, Math.round(totalSpan / Math.max(1, ordered.length) * 1.1));
       for (let i = 0; i < ordered.length; i++) {
@@ -163,8 +167,7 @@ function applyFormation(w: WaveSpec, f: Formation): void {
       break;
     }
     case 'rear_first': {
-      // Rear-pressure still needs a screen: frontliners enter first, then
-      // fragile/specialized units ride behind them.
+      // “后排压力”也需要掩护：前排先进场，脆弱/功能单位跟随。
       let t = baseStart;
       for (let i = 0; i < ordered.length; i++) {
         ordered[i].delayMs = t;
@@ -186,6 +189,7 @@ function reinforceWave(w: WaveSpec, strat: NextStrategy): number {
   const addCount = Math.min(14, Math.max(0, targetNonBoss - nonBoss.length));
   if (addCount <= 0) return 0;
 
+  // 复用战术排序后的模板，新增单位会继承技能并轻微下调个体倍率。
   const templates = tacticalSpawnOrder(nonBoss);
   const firstDelay = Math.min(...nonBoss.map(s => s.delayMs));
   const lastDelay = Math.max(...nonBoss.map(s => s.delayMs));
@@ -226,6 +230,7 @@ function skillsAllowedForWave(waveIndex: number, skills: SkillFlag[]): SkillFlag
 }
 
 function tacticalSpawnOrder(spawns: EnemySpawnSpec[]): EnemySpawnSpec[] {
+  // 将更像前排的单位排在前面；Boss 插入前段，避免被阵型算法推到最后。
   const nonBoss = spawns.filter(s => !isBossSpawn(s));
   const bosses = spawns.filter(isBossSpawn);
   const ordered = [...nonBoss].sort((a, b) => spawnFrontRank(b) - spawnFrontRank(a));

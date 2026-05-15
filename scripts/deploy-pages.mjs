@@ -1,5 +1,5 @@
-// Minimal helper: copies dist/ to a `gh-pages` branch via `git worktree`.
-// Usage: npm run deploy:pages
+// 极简部署辅助：把 dist/ 复制到独立输出目录，方便推到 gh-pages 或静态托管。
+// 用法：npm run deploy:pages
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync, cpSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -19,7 +19,7 @@ if (existsSync(out)) {
 mkdirSync(out, { recursive: true });
 cpSync(dist, out, { recursive: true });
 
-// .nojekyll prevents GitHub Pages from running Jekyll on our raw output.
+// .nojekyll 阻止 GitHub Pages 用 Jekyll 处理原始构建产物。
 writeFileSync(resolve(out, '.nojekyll'), '');
 
 console.log('\nReady. Now from `.gh-pages-out/`:');
