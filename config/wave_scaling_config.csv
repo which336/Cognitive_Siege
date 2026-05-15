@@ -1,0 +1,11 @@
+key,value,note
+late_start_wave,6,wave index where late scaling begins
+hp_per_wave,0.18,normal HP growth per wave index after wave 1
+hp_late_per_wave,0.09,extra late HP growth
+speed_per_wave,0.04,normal speed growth per wave index after wave 1
+speed_late_per_wave,0.015,extra late speed growth
+damage_per_wave,0.16,normal damage growth per wave index after wave 1
+damage_late_per_wave,0.055,extra late damage growth
+bounty_per_wave,0.04,reward growth per wave index after wave 1
+boss_hp_mul,1.55,boss extra HP multiplier
+boss_damage_mul,1.30,boss extra damage multiplier

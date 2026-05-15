@@ -1,0 +1,174 @@
+level_id,route,seq,col,row,note
+level_1,short,1,1,5,spawn
+level_1,short,2,4,5,fork
+level_1,short,3,4,3,upper turn
+level_1,short,4,9,3,upper lane
+level_1,short,5,9,5,drop
+level_1,short,6,13,5,mid lane
+level_1,short,7,13,7,merge approach
+level_1,short,8,19,7,shared merge
+level_1,short,9,22,7,final bend
+level_1,short,10,22,8,self core
+level_1,long,1,1,5,spawn
+level_1,long,2,4,5,fork
+level_1,long,3,4,8,lower entry
+level_1,long,4,7,8,lower lane
+level_1,long,5,7,10,long bottom
+level_1,long,6,14,10,long bottom
+level_1,long,7,14,8,rise
+level_1,long,8,18,8,merge approach
+level_1,long,9,18,7,merge approach
+level_1,long,10,19,7,shared merge
+level_1,long,11,22,7,final bend
+level_1,long,12,22,8,self core
+level_1,edge,1,1,5,spawn
+level_1,edge,2,4,5,fork
+level_1,edge,3,4,2,top edge
+level_1,edge,4,16,2,top run
+level_1,edge,5,16,4,drop
+level_1,edge,6,19,4,side breach
+level_1,edge,7,19,7,shared merge
+level_1,edge,8,22,7,final bend
+level_1,edge,9,22,8,self core
+level_2,short,1,1,5,spawn
+level_2,short,2,4,5,sternum fork
+level_2,short,3,4,3,left lung up
+level_2,short,4,8,3,inhale pocket
+level_2,short,5,8,5,center drop
+level_2,short,6,11,5,breath valve
+level_2,short,7,11,6,cross beat
+level_2,short,8,14,6,right lung
+level_2,short,9,14,8,lower bend
+level_2,short,10,19,8,merge
+level_2,short,11,22,8,self core
+level_2,long,1,1,5,spawn
+level_2,long,2,4,5,sternum fork
+level_2,long,3,4,8,lower lung
+level_2,long,4,7,8,deep inhale
+level_2,long,5,7,10,lower loop
+level_2,long,6,15,10,slow lung
+level_2,long,7,15,8,rise
+level_2,long,8,19,8,merge
+level_2,long,9,22,8,self core
+level_2,edge,1,1,5,spawn
+level_2,edge,2,3,5,edge split
+level_2,edge,3,3,2,upper lung
+level_2,edge,4,7,2,upper inhale
+level_2,edge,5,7,4,drop
+level_2,edge,6,12,4,upper valve
+level_2,edge,7,12,2,top recoil
+level_2,edge,8,18,2,fast rib
+level_2,edge,9,18,6,drop
+level_2,edge,10,19,6,merge side
+level_2,edge,11,19,8,merge
+level_2,edge,12,22,8,self core
+level_3,short,1,1,5,left mirror
+level_3,short,2,4,5,fork
+level_3,short,3,4,4,upper mirror
+level_3,short,4,9,4,mirror gate
+level_3,short,5,9,6,center seam
+level_3,short,6,14,6,reflection seam
+level_3,short,7,14,5,upper exit
+level_3,short,8,19,5,right mirror
+level_3,short,9,19,8,core drop
+level_3,short,10,22,8,self core
+level_3,long,1,1,6,lower mirror
+level_3,long,2,4,6,fork
+level_3,long,3,4,8,lower mirror
+level_3,long,4,9,8,mirror gate
+level_3,long,5,9,6,center seam
+level_3,long,6,14,6,reflection seam
+level_3,long,7,14,8,lower exit
+level_3,long,8,19,8,right mirror
+level_3,long,9,22,8,self core
+level_3,edge,1,1,3,top mirror
+level_3,edge,2,5,3,top split
+level_3,edge,3,5,2,edge mirror
+level_3,edge,4,17,2,long reflection
+level_3,edge,5,17,5,drop
+level_3,edge,6,19,5,upper merge
+level_3,edge,7,19,8,core drop
+level_3,edge,8,22,8,self core
+level_4,short,1,1,5,dry entry
+level_4,short,2,5,5,first island
+level_4,short,3,5,7,sink
+level_4,short,4,9,7,island seam
+level_4,short,5,9,5,rise
+level_4,short,6,14,5,upper island
+level_4,short,7,14,7,drop
+level_4,short,8,19,7,late island
+level_4,short,9,22,7,final bend
+level_4,short,10,22,8,self core
+level_4,long,1,1,8,lower dry entry
+level_4,long,2,3,8,lower fork
+level_4,long,3,3,10,dry floor
+level_4,long,4,10,10,bottom trench
+level_4,long,5,10,9,well edge
+level_4,long,6,16,9,dry run
+level_4,long,7,16,7,rise
+level_4,long,8,20,7,late island
+level_4,long,9,20,8,core approach
+level_4,long,10,22,8,self core
+level_4,edge,1,1,3,upper dry entry
+level_4,edge,2,4,3,upper fork
+level_4,edge,3,4,2,dry rim
+level_4,edge,4,11,2,upper run
+level_4,edge,5,11,4,drop
+level_4,edge,6,17,4,dry shelf
+level_4,edge,7,17,6,sink
+level_4,edge,8,20,6,late shelf
+level_4,edge,9,20,8,core approach
+level_4,edge,10,22,8,self core
+level_5,short,1,1,5,middle breach
+level_5,short,2,4,5,main split
+level_5,short,3,7,5,center scar
+level_5,short,4,7,6,drop
+level_5,short,5,12,6,mid scar
+level_5,short,6,12,7,drop
+level_5,short,7,17,7,late scar
+level_5,short,8,22,7,final bend
+level_5,short,9,22,8,self core
+level_5,long,1,1,9,lower breach
+level_5,long,2,4,9,lower split
+level_5,long,3,4,10,bottom crack
+level_5,long,4,12,10,long crack
+level_5,long,5,12,8,rise
+level_5,long,6,17,8,late merge
+level_5,long,7,22,8,self core
+level_5,edge,1,1,2,upper breach
+level_5,edge,2,5,2,edge split
+level_5,edge,3,5,1,rim crack
+level_5,edge,4,16,1,top fracture
+level_5,edge,5,16,4,fall
+level_5,edge,6,20,4,side crack
+level_5,edge,7,20,8,core wall
+level_5,edge,8,22,8,self core
+level_6,short,1,1,5,left aisle
+level_6,short,2,5,5,bench fork
+level_6,short,3,5,4,upper aisle
+level_6,short,4,10,4,trial floor
+level_6,short,5,10,6,center stand
+level_6,short,6,14,6,judgement seam
+level_6,short,7,14,7,drop
+level_6,short,8,18,7,verdict gate
+level_6,short,9,22,7,final bend
+level_6,short,10,22,8,self core
+level_6,long,1,1,9,lower aisle
+level_6,long,2,4,9,lower bench
+level_6,long,3,4,10,lower court
+level_6,long,4,10,10,back row
+level_6,long,5,10,7,rise
+level_6,long,6,14,7,judgement seam
+level_6,long,7,14,8,lower verdict
+level_6,long,8,18,8,verdict gate
+level_6,long,9,22,8,self core
+level_6,edge,1,1,2,upper aisle
+level_6,edge,2,4,2,upper bench
+level_6,edge,3,4,1,gallery
+level_6,edge,4,10,1,gallery run
+level_6,edge,5,10,4,trial floor
+level_6,edge,6,14,4,upper stand
+level_6,edge,7,14,6,center seam
+level_6,edge,8,18,6,verdict gate
+level_6,edge,9,18,8,drop
+level_6,edge,10,22,8,self core
